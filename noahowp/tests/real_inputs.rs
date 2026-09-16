@@ -1,3 +1,6 @@
+// Mirrors the Fortran expression structure -- see the crate-level note in src/lib.rs.
+#![allow(clippy::neg_multiply)]
+
 //! Exercise the Fortran readers against the actual Noah-OWP input files.
 //!
 //! Hand-written fixtures prove the parsers handle what we *expect*; these prove they handle
@@ -390,4 +393,67 @@ fn genparm_slope_and_scalars() {
         assert_eq!(r.read_string().unwrap(), label);
         assert_eq!(r.read_real().unwrap(), want, "{label}");
     }
+}
+
+// ---------------------------------------------------------------- end-to-end config
+
+#[test]
+fn namelist_config_reads_the_shipped_file() {
+    use noahowp::NamelistConfig;
+
+    let c = NamelistConfig::parse(&fixture("namelist.input")).unwrap();
+
+    assert_eq!(c.dt, 1800.0);
+    assert_eq!(c.startdate, "199801010630");
+    assert_eq!(c.enddate, "199901010630");
+    assert_eq!(c.parameter_dir, "../parameters/");
+    assert_eq!(c.soil_class_name, "STAS");
+    assert_eq!(c.veg_class_name, "MODIFIED_IGBP_MODIS_NOAH");
+    assert_eq!((c.nsoil, c.nsnow, c.nveg), (4, 3, 20));
+    assert_eq!((c.vegtyp, c.croptype, c.sfctyp, c.soilcolor), (1, 0, 1, 4));
+    assert_eq!(c.zwt, -2.0);
+
+    // Derived: soil_depth and zsoil, in the Fortran's summation order.
+    assert_eq!(c.soil_depth.to_bits(), (0.1f32 + 0.3f32 + 0.6f32 + 1.0f32).to_bits());
+    assert_eq!(c.zsoil[1].to_bits(), (-1.0f32 * 0.1f32).to_bits());
+    assert_eq!(c.zsoil[4].to_bits(), (-1.0f32 * (0.1f32 + 0.3f32 + 0.6f32 + 1.0f32)).to_bits());
+}
+
+#[test]
+fn domain_and_levels_from_the_shipped_file() {
+    use noahowp::{domain::Domain, levels::Levels, options::Options, NamelistConfig};
+
+    let c = NamelistConfig::parse(&fixture("namelist.input")).unwrap();
+
+    let l = Levels::new(&c);
+    assert_eq!((l.nsoil, l.nsnow, l.nveg), (4, 3, 20));
+
+    let o = Options::new(&c);
+    assert_eq!(o.opt_run, 8); // runoff_option
+    assert_eq!(o.opt_drn, 8); // drainage_option
+    assert_eq!(o.opt_rad, 3); // radiative_transfer_option
+    assert_eq!(o.opt_stc, 3); // snowsoil_temp_time_option
+    assert_eq!(o.opt_tbot, 2); // soil_temp_boundary_option
+    assert_eq!(o.opt_crop, 0);
+
+    let d = Domain::new(&c).unwrap();
+    assert_eq!(d.dt, 1800.0);
+    assert_eq!(d.start_datetime, 883_636_200.0);
+    assert_eq!(d.end_datetime, 915_172_200.0);
+    assert_eq!((d.dzsnso.lo(), d.dzsnso.hi()), (-2, 4));
+}
+
+#[test]
+fn simulation_timeline_for_the_shipped_run() {
+    use noahowp::date_time_utils::get_utime_list;
+    use noahowp::{domain::Domain, NamelistConfig};
+
+    let c = NamelistConfig::parse(&fixture("namelist.input")).unwrap();
+    let d = Domain::new(&c).unwrap();
+
+    let times = get_utime_list(d.start_datetime, d.end_datetime, d.dt).unwrap();
+    // A full non-leap year at 30-minute steps, inclusive of both endpoints.
+    assert_eq!(times.len(), 365 * 48 + 1);
+    assert_eq!(times[0], d.start_datetime);
+    assert_eq!(*times.last().unwrap(), d.end_datetime);
 }

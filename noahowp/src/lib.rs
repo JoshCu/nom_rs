@@ -4,7 +4,22 @@
 //! and `PORTING.md`. Scope is the BMI path only: no standalone driver, no ASCII forcing
 //! reader, no NetCDF output, no gridded code.
 
+// Ported code preserves the Fortran's expression structure so the arithmetic stays bit-for-bit
+// comparable and a reviewer can read the two side by side. `-1. * x` is written that way
+// upstream and stays that way here.
+#![allow(clippy::neg_multiply)]
+// Fortran passes whole derived types; a ported subroutine takes the same set as separate
+// borrows, which routinely exceeds clippy's argument-count threshold.
+#![allow(clippy::too_many_arguments)]
+
+pub mod date_time_utils;
+pub mod domain;
+pub mod error_check;
 pub mod fortran;
 pub mod layers;
+pub mod levels;
+pub mod namelist_read;
+pub mod options;
 
 pub use layers::Shifted;
+pub use namelist_read::{ConfigError, NamelistConfig};
