@@ -361,16 +361,35 @@ namelist tables, allocate" into a memcpy of a few hundred bytes.
 
 ## 5. Configuration and parameter tables
 
-### 5.1 A Fortran namelist parser
+### 5.1 Two Fortran input readers
 
-Four namelist-format inputs must be read:
+**Correction to an earlier draft of this plan:** the four inputs are *not* all namelists. Only
+two are. `SOILPARM.TBL` and `GENPARM.TBL` are read with list-directed input
+(`READ (21,*) ITMP, BEXP_TABLE(LC), ...`, `src/ParametersRead.f90`), which is a different
+grammar with different rules. Both readers are needed.
+
+**Namelist** (`&group key = values /`):
 
 | File | Groups |
 |---|---|
 | `namelist.input` (the BMI `init_config`) | `timing`, `parameters`, `location`, `forcing`, `model_options`, `structure`, `initial_values` |
 | `MPTABLE.TBL` | `usgs_veg_categories`, `usgs_veg_parameters`, `modis_veg_categories`, `modis_veg_parameters`, `rad_parameters`, `global_parameters`, `crop_parameters`, `irrigation_parameters`, `tiledrain_parameters`, `optional_parameters` |
-| `SOILPARM.TBL` | soil class blocks (`STAS` / `STAS-RUC`) |
-| `GENPARM.TBL` | general parameters |
+
+**List-directed** (`READ (unit,*) a, b, c`):
+
+| File | Shape |
+|---|---|
+| `SOILPARM.TBL` | a class label (`STAS` / `STAS-RUC`), a category count, then one row of 18 values per soil class |
+| `GENPARM.TBL` | `SLOPE_DATA` + count + values, then label/value pairs |
+
+The list-directed semantics that matter: each `READ` statement begins at a **new record**, so
+values left on the previous line are discarded; within a statement the reader continues onto
+following records until the io-list is satisfied; `n*value` repeats; a null value (`,,`) leaves
+its target **unchanged**; and `/` terminates a statement early. Getting the record boundary
+wrong silently shifts a whole table by one column.
+
+Note also that `SAIM_TABLE(MVT,12)` and `LAIM_TABLE` are not single namelist keys --
+`ParametersRead.f90:535-546` assembles them from twelve monthly vectors (`SAI_JAN`..`SAI_DEC`).
 
 Write a small `fortran/namelist.rs` reader — group headers `&name` / `/`, `!` comments,
 `key = v1, v2, ...` with repeat syntax `n*value`, quoted strings, `.true.`/`.false.`. A few
@@ -388,6 +407,9 @@ before reading and the namelist read leaves absent keys untouched. Reproduce the
 Tables depend only on `(parameter_dir, soil_class_name, veg_class_name)`. Parse once into an
 `Arc<Tables>` behind a process-global cache keyed on that triple. For calibration this removes
 ~1300 lines of parsing per model init.
+
+Both readers are implemented and tested against verbatim copies of the upstream files; see
+`noahowp/tests/real_inputs.rs`.
 
 Optional later step: a `build.rs` that bakes the stock `MPTABLE/SOILPARM/GENPARM` into the binary
 as a fallback, so a run needs only `namelist.input`. Keep file loading as the primary path —
