@@ -1,0 +1,10 @@
+[package]
+name = "noahowp"
+description = "Noah-OWP-Modular column model, ported from Fortran"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+# No dependencies, by design. The BMI path needs no NetCDF and no C toolchain.
+[dependencies]

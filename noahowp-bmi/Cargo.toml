@@ -1,0 +1,13 @@
+[package]
+name = "noahowp-bmi"
+description = "BMI surface for the noahowp model"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lib]
+crate-type = ["rlib", "cdylib"]
+
+[dependencies]
+noahowp = { path = "../noahowp" }

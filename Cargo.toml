@@ -1,0 +1,16 @@
+[workspace]
+members = ["noahowp", "noahowp-bmi"]
+resolver = "2"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+repository = "https://github.com/JoshCu/nom_rs"
+
+[profile.release]
+# Bit-identity: LLVM will not reassociate floats without fast-math, which Rust
+# never enables. Keep it that way -- see docs/RUST_REWRITE_PLAN.md section 3.2.
+opt-level = 3
+lto = true
+codegen-units = 1
