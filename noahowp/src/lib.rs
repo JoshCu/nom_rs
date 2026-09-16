@@ -11,7 +11,12 @@
 // Fortran passes whole derived types; a ported subroutine takes the same set as separate
 // borrows, which routinely exceeds clippy's argument-count threshold.
 #![allow(clippy::too_many_arguments)]
+// `excessive_precision` would have us shorten float literals to the digits f32 can hold. That
+// is exactly how a constant drifts a ULP from the Fortran's (it already happened once, to TLC
+// -- see constants.rs). Literals are copied verbatim from the Fortran, full stop.
+#![allow(clippy::excessive_precision)]
 
+pub mod constants;
 pub mod date_time_utils;
 pub mod domain;
 pub mod error_check;

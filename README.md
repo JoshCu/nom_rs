@@ -4,7 +4,23 @@ A Rust reimplementation of the BMI-facing subset of
 [Noah-OWP-Modular](https://github.com/NOAA-OWP/noah-owp-modular), driven by
 [`bmi-driver`](https://github.com/JoshCu/bmi-driver).
 
-**Status: planning.** No model code yet.
+**Status: skeleton and BMI metadata surface.** The physics column is not ported yet.
+
+| Area | State |
+|---|---|
+| Input readers (namelist, list-directed), Fortran-index arrays | done, tested against the real upstream `.TBL` files |
+| Config chain (namelist → levels/options/domain), constants, date utils | done |
+| BMI metadata, grids, time, `initialize`, `finalize` | done |
+| BMI `get_value` / `set_value` | stub -- awaits the state types |
+| BMI `update` (the physics) | stub |
+
+See [`PORTING.md`](PORTING.md) for the per-file table and how to track upstream changes.
+
+```sh
+cargo test      # 125 tests
+cargo clippy --all-targets
+cargo build --release   # target/release/libnoahowp_bmi.so
+```
 
 ## Why
 
@@ -30,4 +46,12 @@ mirroring the Fortran `src/` and `bmi/`, bit-identity rules, verification harnes
 
 ## Upstream
 
-Pinned to `NOAA-OWP/noah-owp-modular` @ `eaa8282`.
+Pinned to `NOAA-OWP/noah-owp-modular` @ `eaa8282`. See [`PORTING.md`](PORTING.md).
+
+## Building the reference Fortran
+
+Bit-identity is verified differentially against a reference build of the Fortran, which needs
+`gfortran` (built with `-O2 -ffp-contract=off`, no `-ffast-math`, and
+`NGEN_FORCING_ACTIVE` / `NGEN_OUTPUT_ACTIVE` defined). That toolchain is not required to build
+or test this repo, but it is required for the Phase 0 spike and for the per-module differential
+fixtures described in the plan.
