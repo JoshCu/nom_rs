@@ -14,12 +14,19 @@
 program probe
   implicit none
 
-  character(len=32) :: fname
+  character(len=32) :: arg, fname
   character(len=8)  :: hexin
-  integer           :: ios, ibits, obits
+  integer           :: ios, ibits, obits, n
   real              :: x, y
 
-  call get_command_argument(1, fname)
+  call get_command_argument(1, arg)
+  fname = trim(adjustl(arg))
+
+  ! Runtime exponent for the pown* cases. Parsed from the name before the loop so it is a
+  ! plain integer variable at the point of use: gfortran cannot constant-fold it, and must
+  ! emit the same generic integer-power path the physics gets for `x ** ifrc`.
+  n = 0
+  if (fname(1:4) == 'pown') read(fname(5:5), '(I1)') n
 
   do
     read(*, '(A8)', iostat=ios) hexin
@@ -27,7 +34,7 @@ program probe
     read(hexin, '(Z8)') ibits
     x = transfer(ibits, x)
 
-    select case (trim(adjustl(fname)))
+    select case (trim(fname))
       case ('exp')
         y = exp(x)
       case ('log')
@@ -40,19 +47,35 @@ program probe
         y = cos(x)
       case ('tanh')
         y = tanh(x)
-      ! Integer exponents: gfortran expands small literal powers inline rather than calling
-      ! powf, and the expansion order decides the result.
+      ! Literal integer exponents: gfortran expands these inline rather than calling powf, and
+      ! the expansion order decides the last bit. 0 through 4 are the only literal exponents
+      ! that appear anywhere in noah-owp-modular's src/.
+      case ('pow0')
+        y = x ** 0
+      case ('pow1')
+        y = x ** 1
       case ('pow2')
         y = x ** 2
       case ('pow3')
         y = x ** 3
+      case ('pow4')
+        y = x ** 4
+      ! Not used by the model; kept because it is where the candidates diverge most, so it is
+      ! the sharpest test of whether the winning spelling is right for the right reason.
       case ('pow7')
         y = x ** 7
+      ! `x ** (-1)`, as in SoilWaterRetentionCoeff.
+      case ('powm1')
+        y = x ** (-1)
+      ! Runtime integer exponent, as in `x ** ifrc` and `x ** (CVFRZ - J)`. This is a
+      ! different code path from the literal cases -- a libcall, not an inline expansion.
+      case ('pown2', 'pown3', 'pown4')
+        y = x ** n
       ! Real exponent: a genuine powf call.
       case ('powr')
         y = x ** 0.6666667
       case default
-        write(0, '(A)') 'unknown function: ' // trim(adjustl(fname))
+        write(0, '(A)') 'unknown function: ' // trim(fname)
         stop 1
     end select
 

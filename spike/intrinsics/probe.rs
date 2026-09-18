@@ -32,7 +32,9 @@ const REAL_EXP: f32 = 0.6666667;
 /// - `f64`   -- widen, compute in double, narrow. Sometimes the only way to match.
 /// - `mul`   -- repeated multiplication, for integer exponents.
 /// - `powi`  -- `f32::powi`, which uses a different reduction order than gfortran's expansion.
-fn candidates(name: &str, x: f32) -> Vec<(&'static str, f32)> {
+///
+/// `n` is the runtime exponent for the `pown*` cases and is ignored by every other intrinsic.
+fn candidates(name: &str, x: f32, n: i32) -> Vec<(&'static str, f32)> {
     match name {
         "exp" => vec![
             ("std", x.exp()),
@@ -64,6 +66,18 @@ fn candidates(name: &str, x: f32) -> Vec<(&'static str, f32)> {
             ("libm", unsafe { tanhf(x) }),
             ("f64", (x as f64).tanh() as f32),
         ],
+        // x**0 and x**1 are trivial, but cheap to pin: a wrong answer here would be a
+        // silent identity error rather than a ULP, and Fortran defines 0.0**0 as 1.0.
+        "pow0" => vec![
+            ("one", 1.0),
+            ("powi", x.powi(0)),
+            ("powf", x.powf(0.0)),
+        ],
+        "pow1" => vec![
+            ("ident", x),
+            ("powi", x.powi(1)),
+            ("powf", x.powf(1.0)),
+        ],
         "pow2" => vec![
             ("mul", x * x),
             ("powi", x.powi(2)),
@@ -75,6 +89,34 @@ fn candidates(name: &str, x: f32) -> Vec<(&'static str, f32)> {
             ("mul_sq", (x * x) * x),
             ("powi", x.powi(3)),
             ("powf", x.powf(3.0)),
+        ],
+        "pow4" => vec![
+            ("mul", x * x * x * x),
+            // Squaring the square -- what exponentiation by squaring produces.
+            ("sq_sq", {
+                let x2 = x * x;
+                x2 * x2
+            }),
+            ("powi", x.powi(4)),
+            ("powf", x.powf(4.0)),
+        ],
+        "powm1" => vec![
+            ("recip", 1.0 / x),
+            ("powi", x.powi(-1)),
+            ("powf", x.powf(-1.0)),
+        ],
+        // Runtime exponent: `n` comes from argv, so neither compiler can fold these into an
+        // inline expansion. `powi` here lowers to a libcall, not to multiplications.
+        "pown2" | "pown3" | "pown4" => vec![
+            ("powi", x.powi(n)),
+            ("powf", x.powf(n as f32)),
+            ("loop", {
+                let mut acc = 1.0f32;
+                for _ in 0..n {
+                    acc *= x;
+                }
+                acc
+            }),
         ],
         "pow7" => vec![
             // Left-to-right, as a naive expansion would.
@@ -107,6 +149,13 @@ fn main() {
         std::process::exit(2);
     });
 
+    // Runtime exponent for the pown* cases, parsed from argv so it is opaque to the
+    // optimiser -- the same condition the Fortran side is held to.
+    let n: i32 = name
+        .strip_prefix("pown")
+        .and_then(|d| d.parse().ok())
+        .unwrap_or(0);
+
     let stdin = io::stdin();
     let stdout = io::stdout();
     let mut out = io::BufWriter::new(stdout.lock());
@@ -123,7 +172,7 @@ fn main() {
         });
         let x = f32::from_bits(bits);
 
-        for (label, y) in candidates(&name, x) {
+        for (label, y) in candidates(&name, x, n) {
             // A closed stdout (piping into `head`) is not an error worth a panic.
             if writeln!(out, "{:08X} {} {:08X}", bits, label, y.to_bits()).is_err() {
                 return;

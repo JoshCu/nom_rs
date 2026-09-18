@@ -22,13 +22,28 @@ RANGES = {
     "sin": (-10.0, 10.0, "linear"),
     "cos": (-10.0, 10.0, "linear"),
     "tanh": (-10.0, 10.0, "linear"),
-    # Bases for integer powers: fractions through to temperatures.
+    # Bases for integer powers: fractions through to temperatures. 0 through 4 are the only
+    # literal exponents that occur in the model; pown* are the same exponents supplied at
+    # runtime, which is a different code path on both sides.
+    "pow0": (1e-3, 1e3, "log"),
+    "pow1": (1e-3, 1e3, "log"),
     "pow2": (1e-3, 1e3, "log"),
     "pow3": (1e-3, 1e3, "log"),
+    "pow4": (1e-3, 1e3, "log"),
+    "powm1": (1e-3, 1e3, "log"),
+    "pown2": (1e-3, 1e3, "log"),
+    "pown3": (1e-3, 1e3, "log"),
+    "pown4": (1e-3, 1e3, "log"),
     "pow7": (0.1, 10.0, "log"),
     # Base for a real exponent, e.g. soil-moisture retention curves.
     "powr": (1e-6, 1e6, "log"),
 }
+
+
+# Integer powers are the only case where a negative base is legal, and the model does pass
+# them (temperature and flux differences). An odd exponent keeps the sign, so a candidate that
+# gets sign handling wrong would go unnoticed on a positive-only sweep.
+SIGNED = {"pow0", "pow1", "pow2", "pow3", "pow4", "pow7", "powm1", "pown2", "pown3", "pown4"}
 
 
 def values(lo, hi, spacing, n):
@@ -46,14 +61,18 @@ def main():
     n = int(sys.argv[2]) if len(sys.argv) > 2 else 20000
     lo, hi, spacing = RANGES[name]
 
+    signed = name in SIGNED
+    magnitudes = values(lo, hi, spacing, n // 2 if signed else n)
+
     seen = set()
-    for v in values(lo, hi, spacing, n):
-        # Round-trip through f32 so the bit pattern is exactly what both probes will read.
-        bits = struct.unpack("<I", struct.pack("<f", v))[0]
-        if bits in seen:
-            continue
-        seen.add(bits)
-        print(f"{bits:08X}")
+    for m in magnitudes:
+        for v in ((m, -m) if signed else (m,)):
+            # Round-trip through f32 so the bit pattern is exactly what both probes read.
+            bits = struct.unpack("<I", struct.pack("<f", v))[0]
+            if bits in seen:
+                continue
+            seen.add(bits)
+            print(f"{bits:08X}")
 
 
 if __name__ == "__main__":

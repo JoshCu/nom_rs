@@ -28,8 +28,13 @@ Needs `gfortran`, `rustc` and `python3`.
 COUNT=200000 ./run.sh # slower, wider
 ```
 
-Exit status 0 means every intrinsic has at least one bit-identical Rust candidate, and the
-output names it. Non-zero names the intrinsics that have none.
+Exit status 0 means every intrinsic has a Rust candidate that is bit-identical **at both `-O`
+and `-O0`**, and the output names it. Non-zero names the intrinsics that have none.
+
+Both optimisation levels are checked because at `-O` LLVM rewrites `x.powf(2.0)` into `x * x`,
+which makes `powf` look bit-identical when the real `powf` call is not. Debug builds -- how
+`cargo test` runs -- would then disagree with release. The runner flags any candidate that wins
+at one level only.
 
 Then record the winning candidate per intrinsic in `noahowp/src/fortran/intrinsics.rs` and have
 the physics port call through it rather than reaching for `f32::exp` directly.
@@ -56,37 +61,61 @@ comparison would measure the optimiser rather than the libm.
 | Intrinsic | Candidates |
 |---|---|
 | `exp` `log` `sqrt` `sin` `cos` `tanh` | `std` (`f32::exp`), `libm` (the C symbol via FFI), `f64` (widen, compute, narrow) |
+| `pow0` `pow1` | the identity (`1.0`, `x`), `powi`, `powf` |
 | `pow2` `pow3` | `mul` (repeated multiply), `powi`, `powf`, `libm` |
+| `pow4` | `mul` (left to right), `sq_sq` ((x²)²), `powi`, `powf` |
 | `pow7` | `mul` (left to right), `binary` (x⁴·x²·x), `powi`, `powf` |
+| `powm1` (`x ** (-1)`) | `recip` (`1.0 / x`), `powi`, `powf` |
+| `pown2` `pown3` `pown4` (runtime exponent) | `powi`, `powf`, `loop` (multiply n times) |
 | `powr` (`x ** 0.6666667`) | `std`, `libm`, `f64`, `exp_log` (`exp(y·log x)`) |
 
-## Findings so far, without gfortran
+0 through 4 are the only literal integer exponents anywhere in `noah-owp-modular/src/`; `**7`
+is kept only because it is where the candidates diverge most, which makes it the sharpest test
+that the winning spelling wins for the right reason. The `pown*` cases cover `x ** ifrc` and
+`x ** (CVFRZ - J)`, where the exponent is a variable -- a libcall on both sides rather than an
+inline expansion, so a different code path from the literal cases. Integer-power inputs include
+negative bases; the rest stay inside their domain so neither probe produces a NaN.
 
-The harness was validated by using one Rust candidate as a synthetic reference. That tells us
-nothing about gfortran, but it does measure how far the candidates sit from **each other** --
-and two results already matter:
+## Verdict
 
-**1. Widening to f64 is not a safe substitute.** Computing in double and narrowing differs from
-direct f32 libm by 1 ULP on ~0.1-1% of inputs for `exp`, `log`, `sin`, `cos` and `powf`, and by
-up to 2 ULP on ~6% of inputs for `tanh`. A port that reaches for `(x as f64).exp() as f32`
-"for accuracy" will not be bit-identical. `sqrt` is the exception -- IEEE-exact either way.
+**GO.** Run 2026-09-18 against GNU Fortran 15.2.0 (Ubuntu 15.2.0-16ubuntu1), rustc 1.98.1, at
+20k and 200k inputs per intrinsic: every intrinsic the model uses has a bit-identical Rust
+candidate at both optimisation levels. Strict bit-identity is achievable, and the plan's
+section 6.4 fallback is not needed.
 
-**2. Integer exponents are the real hazard.** For `x ** 7` the four candidates disagree with
-each other by up to **4 ULP**, and `powi` disagrees with repeated multiplication on 59% of
-inputs. For `x ** 3`, `powf` differs from `powi`/`mul` on 25% of inputs. Whichever spelling
-gfortran uses, the other three are wrong, and the error is well above the noise floor. This is
-the case most likely to force the `strict-libm` fallback in
-`docs/RUST_REWRITE_PLAN.md` section 6.4.
+The winners are recorded in `noahowp/src/fortran/intrinsics.rs`, whose tests carry gfortran's
+own answers as vectors -- so a future rustc that expands `llvm.powi` differently fails CI there
+rather than silently in the physics.
 
-Note the circularity: for `pow2`/`pow3`/`pow7` there is no `libm` candidate to serve as
-reference, so `mul` was used, which makes `mul`'s own "EXACT" result meaningless. The *spread*
-between candidates is the real observation. Only a gfortran run resolves which is right.
+| | Winner | What loses, and by how much |
+|---|---|---|
+| `exp` `log` `sin` `cos` | `f32`'s own method | widening to f64: 1 ULP on 0.07% (`exp`) to 1.4% (`sin`) of inputs |
+| `sqrt` `tanh` | `f32`'s own method | nothing -- all three candidates agree |
+| `x ** <integer>` | **`powi`, always** | `x*x*x*x` is 2 ULP out on 34% of inputs for `**4`; `powf` 1 ULP out on 26% for `**3` |
+| `x ** <real>` | `powf` | `exp(y * log x)`: up to 12 ULP |
+
+**Integer exponents were the real hazard, and `powi` is the answer to all of it.** gfortran
+expands `x ** n` by squaring, so left-to-right multiplication is simply a different computation
+once `n >= 4`: `x * x * x * x` matches `x ** 4` on only 66% of inputs. `powi` matched on every
+exponent probed -- 0, 1, 2, 3, 4, 7, -1, and each of those supplied at runtime. Nothing else
+matched across the board, so the rule is uniform and needs no per-exponent judgement.
+
+**`powf` for an integer exponent is the trap that hides at `-O`.** It appears bit-identical for
+`**2` and `**(-1)` in an optimised build and is not; LLVM folded the call into a multiply. The
+runner now checks both levels and reports any candidate that only wins at one.
+
+**Constant folding is a trap for tests, not for the port.** Both compilers evaluate a
+compile-time-constant argument in higher precision than the libm they would otherwise call, so
+`exp(-29.5739784)` folds to `2A215188` where glibc's `expf` returns `2A215189`. gfortran folds
+to the same value LLVM does, so ported code agrees with the Fortran in either regime -- but a
+test comparing a folded Rust value against a Fortran value the probe computed at runtime will
+fail. `intrinsics.rs` puts the inputs behind `black_box` for this reason.
 
 ## Interpreting the result
 
 - **All EXACT** -> strict bit-identity is achievable. Wire the winning candidates into
   `fortran/intrinsics.rs` and treat any later use of a bare `f32::exp` in ported physics as a
-  bug (worth a CI grep).
+  bug (worth a CI grep). This is what happened; see the verdict above.
 - **Some intrinsics have no match** -> do not abandon the port. Take the plan's section 6.4
   route: pin the divergence to a named function list, quantify the drift over a full Bondville
   year, and decide whether "agrees to N ULP over 17,520 timesteps" is good enough for
