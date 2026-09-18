@@ -1,7 +1,38 @@
 # Porting status
 
 Upstream: [`NOAA-OWP/noah-owp-modular`](https://github.com/NOAA-OWP/noah-owp-modular)
-**pinned at `eaa8282`** ("Fix integer division rounding to 0", 2025-04-29).
+**pinned at `0ff055e`** ("Add OPT_BTR=4 and OPT_RSF=5 to approximate PET ...", #125).
+
+The pin moved from `eaa8282` once a Fortran toolchain was available, because `0ff055e` is what
+the `libsurfacebmi.so` in use at `/dmod/shared_libs/` is built from, and the reference build
+should match what is actually being run. The cost was small: the four files that changed are
+additive, every new branch is gated behind `OPT_BTR == 4` or `OPT_RSF == 5`, and no existing
+option path differs. Only the namelist bounds needed porting (`stomatal_resistance_option` to
+1-4, `evap_srfc_resistance_option` to 1-5). The two new option bodies land with
+`EnergyModule`/`EtFluxModule`.
+
+## Reference toolchain
+
+Bit-identity is a claim about a specific pair of compilers, so both are pinned here. Changing
+either means re-running `spike/intrinsics/run.sh`.
+
+| | Version | Flags |
+|---|---|---|
+| Reference Fortran | GNU Fortran 15.2.0 (Ubuntu 15.2.0-16ubuntu1) | `-O2 -ffp-contract=off -cpp -DNGEN_OUTPUT_ACTIVE`; never `-ffast-math` |
+| Rust | rustc 1.98.1 | stock `dev` and `release` profiles; the intrinsic verdict holds at both |
+
+The intrinsic spike was run against these on 2026-09-18 and returned **GO**: every intrinsic
+the model uses has a bit-identical Rust spelling. See `spike/intrinsics/README.md` for the
+verdict and `noahowp/src/fortran/intrinsics.rs` for the spellings ported code must use.
+
+`NGEN_FORCING_ACTIVE` is deliberately *not* defined for the reference build: leaving the ASCII
+forcing reader in is what lets it run the Bondville year standalone, with no ngen and no NetCDF.
+The shipping BMI path still compiles it out.
+
+**Bit-identity is a claim about a (compiler, libc) pair.** The `libsurfacebmi.so` at
+`/dmod/shared_libs/` was built with GCC 11.5.0 on Red Hat, not the GCC 15.2.0 above. Nothing the
+spike measured varies with compiler version, but that was one pair; if the calibration target is
+the deployed library, regenerate the fixtures with `FC=gfortran-11` and diff them.
 
 ## How to track upstream
 
@@ -101,6 +132,9 @@ only `parse_date`, `julian_date`, `calendar_date`, `date_to_unix`, `unix_to_date
 | `noahowp/src/fortran/value.rs` | Fortran real literal syntax (`1.0d0`, `1.0+6`) that Rust's parser rejects |
 | `noahowp/src/fortran/namelist.rs` | `&group ... /` reader for `namelist.input` and `MPTABLE.TBL` |
 | `noahowp/src/fortran/list_directed.rs` | `READ(unit,*)` semantics for `SOILPARM.TBL` and `GENPARM.TBL` |
+| `noahowp/src/fortran/intrinsics.rs` | the Rust spellings of `EXP`/`LOG`/`**`/... that gfortran matches bit for bit |
+| `noahowp/src/difftest/` | reader for the differential fixtures; `manifest.rs` is generated from the Fortran derived types |
+| `reference/` | builds the reference Fortran and records the per-call fixtures the physics port is verified against |
 
 ## Upstream behaviours that are deliberately preserved
 
@@ -131,3 +165,8 @@ someone tidies it up.
 7. **Secondary parameter derivation is duplicated inline** in `set_value`, not shared with
    `ParametersType::paramRead`. Upstream can update one copy and not the other.
    (outstanding -- lands with `parameters.rs`)
+
+8. **Integer powers go through `powi`, never through repeated multiplication.** gfortran
+   expands `x ** n` by squaring, so `x * x * x * x` is a different computation from `x ** 4`
+   and disagrees on 34% of inputs. `powf` is also not a substitute, and looks correct in
+   release builds only because LLVM folds it into a multiply. (`fortran/intrinsics.rs`)

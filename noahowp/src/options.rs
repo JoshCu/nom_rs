@@ -1,4 +1,4 @@
-//! Port of `src/OptionsType.f90` @ eaa8282.
+//! Port of `src/OptionsType.f90` @ 0ff055e.
 //!
 //! Field names keep the Fortran's short forms (`opt_snf`, `dveg`, ...) because that is what
 //! every physics module branches on; the long namelist names they come from are in
@@ -38,9 +38,10 @@ pub struct Options {
     pub opt_tbot: i32,
     /// supercooled_water_option: 1-2
     pub opt_frz: i32,
-    /// stomatal_resistance_option: 1 Noah, 2 CLM, 3 SSiB
+    /// stomatal_resistance_option: 1 Noah, 2 CLM, 3 SSiB, 4 maximum ETRAN (approximates PET)
     pub opt_btr: i32,
-    /// evap_srfc_resistance_option: 1 Sakaguchi-Zeng, 2 Sellers92, 3 adjusted Sellers, 4 snow
+    /// evap_srfc_resistance_option: 1 Sakaguchi-Zeng, 2 Sellers92, 3 adjusted Sellers, 4 snow,
+    /// 5 minimised for soil evaporation, FSNO weighted (approximates PET)
     pub opt_rsf: i32,
     /// subsurface_option: 1 full Noah-MP, 2 one-way coupled hydrostatic, 3 two-way (unimplemented)
     pub opt_sub: i32,

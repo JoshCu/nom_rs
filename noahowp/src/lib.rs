@@ -18,6 +18,7 @@
 
 pub mod constants;
 pub mod date_time_utils;
+pub mod difftest;
 pub mod domain;
 pub mod error_check;
 pub mod fortran;

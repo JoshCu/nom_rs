@@ -1,4 +1,4 @@
-//! Port of `src/DateTimeUtilsModule.f90` @ eaa8282 -- date handling only.
+//! Port of `src/DateTimeUtilsModule.f90` @ 0ff055e -- date handling only.
 //!
 //! The upstream module also vendors a general string-utility library (`parse`, `compact`,
 //! `shiftstr`, `writeq_*`, ...). None of it is reachable from the BMI path, so none of it is

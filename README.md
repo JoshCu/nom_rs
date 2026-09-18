@@ -19,10 +19,17 @@ with a Fortran toolchain, and the traps found in the Fortran so far. Then
 [`PORTING.md`](PORTING.md) for the per-file table and how to track upstream changes.
 
 ```sh
-cargo test      # 125 tests
+cargo test      # 131 tests; also passes with --release
 cargo clippy --all-targets
 cargo build --release   # target/release/libnoahowp_bmi.so
 ```
+
+**Bit-identity is confirmed achievable.** The Phase 0 intrinsic spike returned GO against
+gfortran 15.2.0: every intrinsic the model uses has a Rust spelling that matches bit for bit.
+Ported physics must call through
+[`noahowp/src/fortran/intrinsics.rs`](noahowp/src/fortran/intrinsics.rs) rather than reaching
+for `f32::exp` or `x * x * x * x` -- several of the obvious spellings are wrong. See
+[`spike/intrinsics/README.md`](spike/intrinsics/README.md).
 
 ## Why
 
@@ -52,8 +59,16 @@ Pinned to `NOAA-OWP/noah-owp-modular` @ `eaa8282`. See [`PORTING.md`](PORTING.md
 
 ## Building the reference Fortran
 
-Bit-identity is verified differentially against a reference build of the Fortran, which needs
-`gfortran` (built with `-O2 -ffp-contract=off`, no `-ffast-math`, and
-`NGEN_FORCING_ACTIVE` / `NGEN_OUTPUT_ACTIVE` defined). That toolchain is not required to build
-or test this repo, but it is required for the Phase 0 spike and for the per-module differential
-fixtures described in the plan.
+Bit-identity is verified differentially against a reference build of the Fortran:
+
+```sh
+cd reference && ./build.sh --fixtures
+```
+
+That records the complete model state before and after each of the five physics calls, over a
+sampled Bondville year, and writes it to `noahowp/tests/fixtures/difftest/`. Each ported Rust
+function is then held to reproducing the post-state bit for bit from the pre-state. See
+[`reference/README.md`](reference/README.md).
+
+The fixtures are committed, so **`gfortran` is not needed to build or test this repo** -- only
+to regenerate them. The reference build needs no ngen, no CMake and no NetCDF.

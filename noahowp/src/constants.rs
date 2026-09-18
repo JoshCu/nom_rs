@@ -1,4 +1,4 @@
-//! Port of `src/ConstantsModule.f90` @ eaa8282.
+//! Port of `src/ConstantsModule.f90` @ 0ff055e.
 //!
 //! Derived constants keep their defining expressions (`CP = 7.*R_D/2.`) rather than a
 //! pre-computed literal: Rust evaluates `const` float arithmetic at compile time under the same

@@ -1,4 +1,4 @@
-//! Port of `src/DomainType.f90` @ eaa8282.
+//! Port of `src/DomainType.f90` @ 0ff055e.
 
 use crate::date_time_utils::{date_to_unix, DateError};
 use crate::layers::Shifted;

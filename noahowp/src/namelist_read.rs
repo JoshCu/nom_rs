@@ -1,4 +1,4 @@
-//! Port of `src/NamelistRead.f90` @ eaa8282.
+//! Port of `src/NamelistRead.f90` @ 0ff055e.
 //!
 //! Reads the model configuration (the BMI `init_config` file). The Fortran signals every
 //! problem with `write(*,*)` + `stop`; here each becomes a `ConfigError` so a calibration
@@ -274,8 +274,8 @@ impl NamelistConfig {
         check_option("snowsoil_temp_time_option", snowsoil_temp_time_option, 1, 3)?;
         check_option("soil_temp_boundary_option", soil_temp_boundary_option, 1, 2)?;
         check_option("supercooled_water_option", supercooled_water_option, 1, 2)?;
-        check_option("stomatal_resistance_option", stomatal_resistance_option, 1, 3)?;
-        check_option("evap_srfc_resistance_option", evap_srfc_resistance_option, 1, 4)?;
+        check_option("stomatal_resistance_option", stomatal_resistance_option, 1, 4)?;
+        check_option("evap_srfc_resistance_option", evap_srfc_resistance_option, 1, 5)?;
         check_option("subsurface_option", subsurface_option, 1, 3)?;
 
         // Arrays can only be sized once nsoil/nsnow are known.
@@ -387,7 +387,7 @@ impl NamelistConfig {
 /// The configuration shipped as `run/namelist.input`, for tests across the crate.
 #[cfg(test)]
 pub(crate) mod tests_support {
-    /// Verbatim content of the upstream `run/namelist.input` @ eaa8282, comments removed.
+    /// Verbatim content of the upstream `run/namelist.input` @ 0ff055e, comments removed.
     pub const SHIPPED: &str = r#"
 &timing
   dt = 1800.0
@@ -545,8 +545,8 @@ mod tests {
             ("  snowsoil_temp_time_option = 3", "  snowsoil_temp_time_option = 4"),
             ("  soil_temp_boundary_option = 2", "  soil_temp_boundary_option = 3"),
             ("  supercooled_water_option = 1", "  supercooled_water_option = 3"),
-            ("  stomatal_resistance_option = 1", "  stomatal_resistance_option = 4"),
-            ("  evap_srfc_resistance_option = 1", "  evap_srfc_resistance_option = 5"),
+            ("  stomatal_resistance_option = 1", "  stomatal_resistance_option = 5"),
+            ("  evap_srfc_resistance_option = 1", "  evap_srfc_resistance_option = 6"),
             ("  subsurface_option = 1", "  subsurface_option = 4"),
         ] {
             let src = GOOD.replace(line, bad);

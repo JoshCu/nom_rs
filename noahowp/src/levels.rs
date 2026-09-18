@@ -1,4 +1,4 @@
-//! Port of `src/LevelsType.f90` @ eaa8282.
+//! Port of `src/LevelsType.f90` @ 0ff055e.
 
 use crate::namelist_read::NamelistConfig;
 

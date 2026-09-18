@@ -1,4 +1,4 @@
-//! The BMI exchange-item registry, from `bmi/bmi_noahowp.f90` @ eaa8282.
+//! The BMI exchange-item registry, from `bmi/bmi_noahowp.f90` @ 0ff055e.
 //!
 //! Upstream spreads this across four `select case` blocks (`noahowp_var_type`,
 //! `noahowp_var_units`, `noahowp_var_grid`, `noahowp_var_itemsize`) that must agree with each

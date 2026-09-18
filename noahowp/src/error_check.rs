@@ -1,4 +1,4 @@
-//! Port of `src/ErrorCheckModule.f90` @ eaa8282.
+//! Port of `src/ErrorCheckModule.f90` @ 0ff055e.
 //!
 //! `sys_abort` has no Rust counterpart: callers return a typed error instead of stopping the
 //! process, which a calibration driver needs.

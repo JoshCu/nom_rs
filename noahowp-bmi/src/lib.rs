@@ -1,4 +1,4 @@
-//! Port of `bmi/bmi_noahowp.f90` @ eaa8282.
+//! Port of `bmi/bmi_noahowp.f90` @ 0ff055e.
 //!
 //! Scope is what `bmi-driver` actually calls -- see `docs/RUST_REWRITE_PLAN.md` section 1.1.
 //! `get_value_ptr`, `*_at_indices` and the extended grid functions are deliberately absent.

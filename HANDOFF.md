@@ -7,14 +7,23 @@ the work that needs one is set up ready to run rather than left as prose.
 Read in this order: this file, then `PORTING.md` (per-file status), then
 `docs/RUST_REWRITE_PLAN.md` (the full design).
 
+> **Update, same day, with gfortran 15.2.0 in hand: steps 1 to 3 below are done.**
+> The intrinsic spike says **GO** -- every intrinsic the model uses has a bit-identical Rust
+> spelling, recorded in `noahowp/src/fortran/intrinsics.rs`. The reference Fortran builds with
+> no ngen, no CMake and no NetCDF, and the differential fixture generator exists: a sampled
+> Bondville year is recorded before and after each of the five physics calls, committed, and
+> validated by `noahowp/tests/difftest_fixtures.rs`. `gfortran` is no longer needed to build or
+> test this repo, only to regenerate fixtures. **The next action is step 4** -- the port itself,
+> starting with `ParametersRead` + `ParametersType`.
+
 ---
 
 ## 1. What exists
 
-Five commits on `main`. **125 tests, clippy clean, release cdylib builds.**
+Seven commits on `main`. **140 tests, clippy clean in debug and release, release cdylib builds.**
 
 ```sh
-cargo test                  # 125
+cargo test                  # 140, and again with --release
 cargo clippy --all-targets  # 0 warnings
 cargo build --release       # target/release/libnoahowp_bmi.so
 ```
@@ -31,6 +40,9 @@ cargo build --release       # target/release/libnoahowp_bmi.so
 | Constants | `constants.rs` | derived constants keep their defining expressions |
 | Date handling | `date_time_utils.rs` | `parse_date`, `julian_date`, `calendar_date`, `date_to_unix`, `unix_to_date`, `get_utime_list` |
 | BMI metadata surface | `noahowp-bmi/src/lib.rs`, `vars.rs` | names, counts, types, units, grids, itemsize, nbytes, location, all time functions, `initialize`, `finalize` |
+| Bit-identical intrinsics | `noahowp/src/fortran/intrinsics.rs` | the spellings of `EXP`/`LOG`/`**`/... gfortran matches, pinned by gfortran's own answers as test vectors |
+| Reference Fortran + fixtures | `reference/` | builds upstream at the pin and records the state around all five physics calls over a Bondville year |
+| Fixture reader | `noahowp/src/difftest/` | `manifest.rs` generated from the Fortran derived types; `State::diff` names the fields that disagree |
 
 Both input readers are tested against **verbatim copies** of the upstream `MPTABLE.TBL`,
 `SOILPARM.TBL`, `GENPARM.TBL` and `namelist.input` in `noahowp/tests/fixtures/`, not against
@@ -53,82 +65,92 @@ want to see what is actually proven.
 
 ## 2. Start here, with gfortran in hand
 
-### Step 1 -- run the Phase 0 spike (one command, ~1 minute)
+### Step 1 -- the Phase 0 spike: done, verdict GO
 
 ```sh
-cd spike/intrinsics && ./run.sh
+cd spike/intrinsics && ./run.sh     # ~1 minute; COUNT=200000 ./run.sh for the wide sweep
 ```
 
-This is the **go/no-go on strict bit-identity** and it is the single highest-value thing you can
-do first, because it is the only open question that no amount of careful translation can fix
-later. Read `spike/intrinsics/README.md` for what it does and how to read the result.
+Run against GNU Fortran 15.2.0 and rustc 1.98.1 at 20k and 200k inputs per intrinsic: **every
+intrinsic the model uses has a bit-identical Rust candidate**, at `-O` and at `-O0`. Strict
+bit-identity is achievable and the plan's §6.4 fallback is not needed. The winners are in
+`noahowp/src/fortran/intrinsics.rs`; ported physics calls through it, and a bare `f32::exp()`
+in `noahowp/src/physics/` is a CI-greppable bug.
 
-It answers "which Rust spelling of each intrinsic matches gfortran bit for bit", by having the
-Rust probe emit every candidate and reporting which agrees. Exit 0 means all clear and the
-output names the winners.
+The rule turned out to be short: **`f32`'s own method for the transcendentals, `powi` for every
+integer exponent, `powf` for real ones.** Four things the run settled that the no-gfortran
+guesswork had not:
 
-Two things are already known without gfortran, from candidate-vs-candidate spread:
+- **The literal exponents in the model are 0..4, not 7.** `**7` never appears; `**2` (20
+  sites), `**3` (13) and `**4` (11) do, plus `x ** ifrc` and `x ** (CVFRZ - J)` where the
+  exponent is a runtime variable. The spike now probes exactly that set, with negative bases.
+- **`x * x * x * x` is wrong for `x ** 4`** -- gfortran expands by squaring, so left-to-right
+  multiplication disagrees on 34% of inputs by up to 2 ULP. This is the one that would have
+  been written by instinct and silently shifted results. `powi` matched every exponent probed,
+  literal and runtime alike, so no per-exponent judgement is needed.
+- **`powf` for an integer exponent looks correct in release and is not.** LLVM rewrites
+  `x.powf(2.0)` into `x * x`, so an optimised build hides the 1-ULP disagreement that a debug
+  build -- how `cargo test` runs -- would show. `run.sh` now builds the Rust probe at both
+  levels and flags any candidate that wins at only one.
+- **Constant folding is a trap for tests, not for the port.** Both compilers evaluate a
+  compile-time-constant argument in higher precision than the libm they would otherwise call:
+  `exp(-29.5739784)` folds to `2A215188` where glibc returns `2A215189`. gfortran folds to the
+  same value LLVM does, so ported code agrees either way -- but a test comparing a folded Rust
+  value against a probe value computed at runtime fails. `intrinsics.rs` puts its inputs behind
+  `black_box`, and pins both values so the reasoning cannot rot.
 
-- **Widening to f64 is not a safe substitute** for f32 libm: 1 ULP apart on ~0.1-1% of inputs
-  for `exp`/`log`/`sin`/`cos`/`powf`, 2 ULP on ~6% for `tanh`. `sqrt` is exact either way.
-- **Integer exponents are the real hazard.** For `x ** 7` the candidates disagree with each
-  other by up to 4 ULP; `powi` disagrees with repeated multiplication on 59% of inputs. For
-  `x ** 3`, `powf` differs from `powi`/`mul` on 25%. Whichever gfortran uses, the others are
-  wrong by well above the noise floor.
+Widening to f64 is confirmed unsafe, as suspected: 1 ULP apart on 0.07% of `exp` inputs and
+1.4% of `sin`. `sqrt` and `tanh` are exact either way, but there is no reason to special-case
+them.
 
-Whatever the verdict, **record the winning candidate per intrinsic in a new
-`noahowp/src/fortran/intrinsics.rs`** and have ported physics call through it. A bare
-`f32::exp()` in `noahowp/src/physics/` should then be a CI-greppable bug.
+### Steps 2 and 3 -- reference build and differential fixtures: done
 
-If some intrinsic has no exact match: don't abandon the goal, take
-`docs/RUST_REWRITE_PLAN.md` §6.4 -- pin the divergence to a named list, measure the drift over a
-full Bondville year, and decide whether it is acceptable for calibration. It probably is. What
-matters is measuring rather than assuming.
-
-### Step 2 -- build the reference Fortran
-
-Pin the compiler version and record it in `PORTING.md`. Flags that matter:
-
+```sh
+cd reference && ./build.sh --fixtures     # ~1 minute; the Bondville year itself takes 0.14 s
 ```
--O2 -ffp-contract=off       # no fused multiply-add; never -ffast-math
--cpp -DNGEN_FORCING_ACTIVE -DNGEN_OUTPUT_ACTIVE
-```
 
-Those two defines are what put the model on the BMI path: they compile out the ASCII forcing
-reader and the NetCDF output module, which is the whole reason this port has no external
-dependencies.
+The advice to skip BMI was right, and it paid better than expected. **No ngen, no CMake, no
+NetCDF, and no `.so`.** `-DNGEN_OUTPUT_ACTIVE` compiles out `OutputModule` -- the only NetCDF
+user -- while leaving `NGEN_FORCING_ACTIVE` *undefined* keeps the ASCII forcing reader, so a
+plain `program` driving `initialize_from_file` + `advance_in_time` runs the full Bondville year
+from `data/bondville.dat`. `reference/README.md` has the details.
 
-**A trap worth knowing before you start:** `noah-owp-modular` has no CMake of its own. Its
-`Makefile` produces `.o` files, and `libsurfacebmi.so` is built by a CMake wrapper that lives in
-**ngen's** `extern/noah-owp-modular/` (see `.github/workflows/ngen_integration.yaml`), together
-with the `iso_c_fortran_bmi` middleware. So getting a loadable Fortran `.so` means pulling in
-ngen, or writing a small standalone `CMakeLists.txt`.
+`solve_noahowp` turned out to call exactly five subroutines -- `UtilitiesMain`, `ForcingMain`,
+`InterceptionMain`, `EnergyMain`, `WaterMain` -- which is a small enough surface that the whole
+physics port is now a checklist of five entry points.
 
-**You probably don't need the `.so` at all.** For per-module differential testing (§6.2 of the
-plan), skip BMI entirely: write a short Fortran driver that calls the physics subroutines
-directly and dumps the derived types as raw bytes. That avoids ngen, the middleware and the
-whole C ABI question, and it is what actually catches translation bugs. Build the `.so` later,
-only when you want the end-to-end `bmi-driver` comparison.
+Three things worth knowing if you touch it:
 
-### Step 3 -- the differential fixture generator
+- **The serializer is generated, not written.** `gen_serializer.py` parses the derived types and
+  emits both the Fortran writer and `noahowp/src/difftest/manifest.rs`, so a field added
+  upstream appears on both sides at once. Hand-writing ~500 field accesses across seven types
+  and keeping them in step with upstream was never going to survive. The parser refuses to skip
+  a declaration it cannot understand, which caught a real bug in its own first draft: the
+  attribute-list regex rejected `dimension(:)` and silently dropped every allocatable field.
+  Silent is the dangerous part -- a missing field shifts every field after it, and the damage
+  would have surfaced as unrelated physics appearing to be wrong.
+- **The upstream `src/Makefile` OBJS list is a link order, not a compile order.** `DomainType`
+  uses `DateTimeUtilsModule` and comes before it. `compile_order.py` derives the order from the
+  `use` graph instead.
+- **The upstream checkout is never written to.** Sources come out of the pinned commit via
+  `git archive`, and the instrumentation is applied to the build copy. `instrument.py` requires
+  each of the five call sites to appear exactly once, so an upstream rename stops the build
+  rather than quietly mislabelling a tag.
 
-This is the tool the whole physics port depends on, so build it before porting physics.
-
-1. Add a `#ifdef DIFFTEST` block to the Fortran that, on each call to a `*Main` subroutine,
-   writes the raw bytes of the derived types before and after.
-2. Run a Bondville year, sampling ~200 states per module.
-3. Commit the fixtures. Each ported Rust function then has to reproduce the post-state
-   bit-for-bit from the pre-state.
-
-This turns the port into a checklist and gives you a permanent regression suite for every future
-upstream port. Do it once, properly.
+Fixtures are committed (~3 MB, 200 sampled timesteps: the first 24 consecutively for spin-up,
+then spread across the year so the snow physics is actually reached).
+`noahowp/tests/difftest_fixtures.rs` validates the recording against the Bondville namelist and
+checks that a truncated, corrupted or misaligned fixture is rejected rather than read into
+plausible nonsense.
 
 ### Step 4 -- then the port, in this order
 
 `PORTING.md` has the full table. The order that keeps things verifiable:
 
 1. `ParametersRead` + `ParametersType` -- the readers are done, so this is table assembly plus
-   secondary-parameter derivation. Test against the Fortran over the full cross product of
+   secondary-parameter derivation. The fixture's static block already holds the Fortran's fully
+   assembled `parameters` for the Bondville config, so `Fixture::static_state("parameters")` is
+   a ready-made assertion for all 134 fields. Then widen to the full cross product of
    `(veg_class_name, veg type 1..27, soil class 1..30)`; §6.3 of the plan.
 2. `ForcingType`, `EnergyType`, `WaterType` -- plain data, mechanical.
 3. `get_value` / `set_value` -- now unblocked. Watch the two traps in §4 below.
