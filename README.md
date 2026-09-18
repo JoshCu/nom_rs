@@ -14,7 +14,9 @@ A Rust reimplementation of the BMI-facing subset of
 | BMI `get_value` / `set_value` | stub -- awaits the state types |
 | BMI `update` (the physics) | stub |
 
-See [`PORTING.md`](PORTING.md) for the per-file table and how to track upstream changes.
+**Picking this up?** Start with [`HANDOFF.md`](HANDOFF.md) -- current state, what to do first
+with a Fortran toolchain, and the traps found in the Fortran so far. Then
+[`PORTING.md`](PORTING.md) for the per-file table and how to track upstream changes.
 
 ```sh
 cargo test      # 125 tests
