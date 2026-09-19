@@ -21,7 +21,9 @@ cd "$(dirname "$0")"
 # exponents supplied at runtime (`x ** ifrc`), which is a libcall on both sides rather than an
 # inline expansion. pow7 is not used by the model and is kept only because it is where the
 # candidates diverge most.
-INTRINSICS=(exp log sqrt sin cos tanh pow0 pow1 pow2 pow3 pow4 pow7 powm1 pown2 pown3 pown4 powr)
+INTRINSICS=(exp log log10 sqrt sin cos tan asin acos atan tanh
+            pow0 pow1 pow2 pow3 pow4 pow7 powm1 pown2 pown3 pown4 powr
+            sign1 nint int mod24)
 COUNT="${COUNT:-20000}"
 OUT=out
 mkdir -p "$OUT"

@@ -19,7 +19,18 @@ extern "C" {
     fn sinf(x: f32) -> f32;
     fn cosf(x: f32) -> f32;
     fn tanhf(x: f32) -> f32;
+    fn tanf(x: f32) -> f32;
+    fn asinf(x: f32) -> f32;
+    fn acosf(x: f32) -> f32;
+    fn atanf(x: f32) -> f32;
+    fn log10f(x: f32) -> f32;
     fn powf(x: f32, y: f32) -> f32;
+}
+
+/// Reinterpret an integer result as an f32 so it can travel through the same channel as the
+/// floating-point candidates. Only the bits are ever compared.
+fn int_bits(i: i32) -> f32 {
+    f32::from_bits(i as u32)
 }
 
 /// The exponent gfortran's `x ** 0.6666667` is given.
@@ -68,6 +79,54 @@ fn candidates(name: &str, x: f32, n: i32) -> Vec<(&'static str, f32)> {
         ],
         // x**0 and x**1 are trivial, but cheap to pin: a wrong answer here would be a
         // silent identity error rather than a ULP, and Fortran defines 0.0**0 as 1.0.
+        "tan" => vec![
+            ("std", x.tan()),
+            ("libm", unsafe { tanf(x) }),
+            ("f64", (x as f64).tan() as f32),
+        ],
+        "asin" => vec![
+            ("std", x.asin()),
+            ("libm", unsafe { asinf(x) }),
+            ("f64", (x as f64).asin() as f32),
+        ],
+        "acos" => vec![
+            ("std", x.acos()),
+            ("libm", unsafe { acosf(x) }),
+            ("f64", (x as f64).acos() as f32),
+        ],
+        "atan" => vec![
+            ("std", x.atan()),
+            ("libm", unsafe { atanf(x) }),
+            ("f64", (x as f64).atan() as f32),
+        ],
+        "log10" => vec![
+            ("std", x.log10()),
+            ("libm", unsafe { log10f(x) }),
+            ("f64", (x as f64).log10() as f32),
+            // The identity a compiler is tempted to apply.
+            ("ln_ratio", x.ln() / std::f32::consts::LN_10),
+        ],
+        // SIGN(1.0, x): the Fortran standard says |a| when b >= 0, and -0.0 >= 0 is true --
+        // so SIGN(1.0, -0.0) is +1.0 where copysign gives -1.0.
+        "sign1" => vec![
+            ("copysign", 1.0f32.copysign(x)),
+            ("ge_zero", if x >= 0.0 { 1.0 } else { -1.0 }),
+        ],
+        // NINT and INT yield integers; the candidates emit the integer's own bits so the
+        // comparison is not confused by the sign of zero. See probe.f90.
+        "nint" => vec![
+            ("round", int_bits(x.round() as i32)),
+            ("round_ties_even", int_bits(x.round_ties_even() as i32)),
+        ],
+        "int" => vec![
+            ("trunc", int_bits(x as i32)),
+            ("floor", int_bits(x.floor() as i32)),
+        ],
+        // Fortran MOD is the truncated remainder; MODULO is the Euclidean one.
+        "mod24" => vec![
+            ("rem", x % 24.0),
+            ("rem_euclid", x.rem_euclid(24.0)),
+        ],
         "pow0" => vec![
             ("one", 1.0),
             ("powi", x.powi(0)),

@@ -87,12 +87,28 @@ The winners are recorded in `noahowp/src/fortran/intrinsics.rs`, whose tests car
 own answers as vectors -- so a future rustc that expands `llvm.powi` differently fails CI there
 rather than silently in the physics.
 
+The set probed is every intrinsic that appears in `noah-owp-modular/src/`, not a sample.
+
 | | Winner | What loses, and by how much |
 |---|---|---|
 | `exp` `log` `sin` `cos` | `f32`'s own method | widening to f64: 1 ULP on 0.07% (`exp`) to 1.4% (`sin`) of inputs |
-| `sqrt` `tanh` | `f32`'s own method | nothing -- all three candidates agree |
+| `log10` `sqrt` `tan` `asin` `acos` `atan` `tanh` | `f32`'s own method | nothing -- all candidates agree |
 | `x ** <integer>` | **`powi`, always** | `x*x*x*x` is 2 ULP out on 34% of inputs for `**4`; `powf` 1 ULP out on 26% for `**3` |
 | `x ** <real>` | `powf` | `exp(y * log x)`: up to 12 ULP |
+| `SIGN(a, b)` | `copysign` | `if b >= 0.0` is wrong for `b = -0.0` |
+| `MOD(a, p)` | `%` | `rem_euclid` (Fortran's `MODULO`) differs on every negative argument |
+| `NINT(x)` | `round() as i32` | `round_ties_even` differs on every exact `.5` |
+| `INT(x)` | `as i32` | `floor` differs on every negative argument |
+
+**`SIGN` does not follow the standard's plain reading.** Fortran 2018 says `SIGN(A, B)` is
+`|A|` when `B >= 0`, and `-0.0 >= 0` is true -- but gfortran returns `-|A|` for `B = -0.0`,
+following IEEE `copysign`. A linear sweep never lands exactly on zero, so the sweep now forces
+`-0.0` into the input set rather than leaving the case untested.
+
+**`NINT` and `INT` are compared as integers**, not as reals. Converting the result back to a
+real to travel through the probe would compare `real(int(-0.5)) = +0.0` against Rust's
+`trunc(-0.5) = -0.0`: a sign-of-zero artifact of the harness, and one that made both look
+wrong until the probe was fixed.
 
 **Integer exponents were the real hazard, and `powi` is the answer to all of it.** gfortran
 expands `x ** n` by squaring, so left-to-right multiplication is simply a different computation

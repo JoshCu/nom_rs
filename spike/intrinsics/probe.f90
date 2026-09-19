@@ -47,6 +47,34 @@ program probe
         y = cos(x)
       case ('tanh')
         y = tanh(x)
+      case ('tan')
+        y = tan(x)
+      case ('asin')
+        y = asin(x)
+      case ('acos')
+        y = acos(x)
+      case ('atan')
+        y = atan(x)
+      case ('log10')
+        y = log10(x)
+      ! Not libm calls, but their Fortran semantics differ from Rust's defaults often enough
+      ! to be worth pinning: SIGN treats -0.0 as positive, NINT rounds half away from zero,
+      ! INT truncates toward zero, and MOD is the truncated remainder rather than Euclidean.
+      case ('sign1')
+        y = sign(1.0, x)
+      ! These two yield an integer. Round-tripping through real would compare
+      ! real(int(-0.5)) = +0.0 against Rust's trunc(-0.5) = -0.0 -- a sign-of-zero artifact of
+      ! the probe, not a difference in the conversion. The integer's own bits are emitted.
+      case ('nint')
+        obits = nint(x)
+        write(*, '(A8,1X,Z8.8)') hexin, obits
+        cycle
+      case ('int')
+        obits = int(x)
+        write(*, '(A8,1X,Z8.8)') hexin, obits
+        cycle
+      case ('mod24')
+        y = mod(x, 24.0)
       ! Literal integer exponents: gfortran expands these inline rather than calling powf, and
       ! the expansion order decides the last bit. 0 through 4 are the only literal exponents
       ! that appear anywhere in noah-owp-modular's src/.

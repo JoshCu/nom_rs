@@ -73,6 +73,69 @@ pub fn tanh(x: f32) -> f32 {
     x.tanh()
 }
 
+/// Fortran `LOG10(x)`.
+#[inline]
+pub fn log10(x: f32) -> f32 {
+    x.log10()
+}
+
+/// Fortran `TAN(x)`.
+#[inline]
+pub fn tan(x: f32) -> f32 {
+    x.tan()
+}
+
+/// Fortran `ASIN(x)`.
+#[inline]
+pub fn asin(x: f32) -> f32 {
+    x.asin()
+}
+
+/// Fortran `ACOS(x)`.
+#[inline]
+pub fn acos(x: f32) -> f32 {
+    x.acos()
+}
+
+/// Fortran `ATAN(x)`.
+#[inline]
+pub fn atan(x: f32) -> f32 {
+    x.atan()
+}
+
+/// Fortran `SIGN(a, b)` -- the magnitude of `a` with the sign of `b`.
+///
+/// `copysign`, not `if b >= 0.0`. Reading the standard suggests the latter, since `-0.0 >= 0`
+/// is true and the standard says "`|a|` when `b >= 0`" -- but gfortran returns `-|a|` for
+/// `b = -0.0`, following IEEE. The spike probes `-0.0` explicitly for this reason.
+#[inline]
+pub fn sign(a: f32, b: f32) -> f32 {
+    a.abs().copysign(b)
+}
+
+/// Fortran `MOD(a, p)` for reals -- the truncated remainder.
+///
+/// Rust's `%` is the same operation. `rem_euclid` is Fortran's `MODULO`, and disagrees on
+/// every negative argument.
+#[inline]
+pub fn modulo_trunc(a: f32, p: f32) -> f32 {
+    a % p
+}
+
+/// Fortran `INT(x)` -- truncation toward zero.
+#[inline]
+pub fn int(x: f32) -> i32 {
+    x as i32
+}
+
+/// Fortran `NINT(x)` -- round half away from zero.
+///
+/// Not `round_ties_even`, which differs on every exact `.5`.
+#[inline]
+pub fn nint(x: f32) -> i32 {
+    x.round() as i32
+}
+
 /// Fortran `x ** n` where `n` is an integer -- literal or variable, positive or negative.
 ///
 /// Do not hand-expand this into multiplications. See the module docs: for `n >= 4` the
@@ -245,6 +308,96 @@ mod tests {
         (0x3C6E_BF01, 0x4289_401A),
     ];
 
+    /// `LOG10(x)`.
+    const LOG10: Vectors = &[
+        (0x322B_CC77, 0xC100_0000),
+        (0x369B_B2B4, 0xC0AA_ABC2),
+        (0x3B0D_1B3A, 0xC02A_AF09),
+        (0x3F7F_C3AA, 0xB9D1_B99E),
+        (0x43E7_CB6B, 0x402A_A1EE),
+        (0x4852_123F, 0x40AA_A534),
+        (0x32A2_C7F0, 0xC0F7_1DCA),
+    ];
+    /// `TAN(x)`.
+    const TAN: Vectors = &[
+        (0xC120_0000, 0xBF25_FAFA),
+        (0xC0D5_56B3, 0xBECE_AB15),
+        (0xC055_5ACC, 0xBE47_238E),
+        (0xBA03_141C, 0xBA03_141D),
+        (0x4055_4A69, 0x3E46_1381),
+        (0x40D5_4E82, 0x3ECE_12BA),
+    ];
+    /// `ASIN(x)`.
+    const ASIN: Vectors = &[
+        (0xBF80_0000, 0xBFC9_0FDB),
+        (0xBF2A_ABC2, 0xBF3A_D0E5),
+        (0xBEAA_AF09, 0xBEAE_03BD),
+        (0xB851_B9C7, 0xB851_B9C7),
+        (0x3EAA_A1EE, 0x3EAD_F5D6),
+        (0x3F2A_A534, 0x3F3A_C81A),
+    ];
+    /// `ACOS(x)`.
+    const ACOS: Vectors = &[
+        (0xBF80_0000, 0x4049_0FDB),
+        (0xBF2A_ABC2, 0x4013_3C27),
+        (0xBEAA_AF09, 0x3FF4_90CA),
+        (0xB851_B9C7, 0x3FC9_117E),
+        (0x3EAA_A1EE, 0x3F9D_9265),
+        (0x3F2A_A534, 0x3F57_579B),
+    ];
+    /// `ATAN(x)`.
+    const ATAN: Vectors = &[
+        (0xC2C8_0000, 0xBFC7_C82F),
+        (0xC285_5630, 0xBFC7_2462),
+        (0xC205_58BF, 0xBFC5_3935),
+        (0xBBA3_D923, 0xBBA3_D8CA),
+        (0x4205_4E82, 0x3FC5_38EA),
+        (0x4285_5111, 0x3FC7_244F),
+    ];
+
+    /// `SIGN(1.0, x)`. The last entry is `-0.0`, where `b >= 0.0` gives the wrong sign.
+    const SIGN1: Vectors = &[
+        (0x0000_0000, 0x3F80_0000),
+        (0xC0D5_6715, 0xBF80_0000),
+        (0xC055_7B91, 0xBF80_0000),
+        (0xBB23_D923, 0xBF80_0000),
+        (0x4055_29A4, 0x3F80_0000),
+        (0x40D5_3E1F, 0x3F80_0000),
+        (0x8000_0000, 0xBF80_0000),
+    ];
+
+    /// `NINT(x)` and `INT(x)`, as the integer's own bits.
+    const NINT: Vectors = &[
+        (0xC37A_0000, 0xFFFF_FF06),
+        (0xC326_C000, 0xFFFF_FF59),
+        (0xC2A7_0000, 0xFFFF_FFAC),
+        (0xBE80_0000, 0x0000_0000),
+        (0x42A6_0000, 0x0000_0053),
+        (0x4326_4000, 0x0000_00A6),
+        (0xBF00_0000, 0xFFFF_FFFF),
+    ];
+
+    const INT: Vectors = &[
+        (0xC47A_0000, 0xFFFF_FC18),
+        (0xC426_ABBC, 0xFFFF_FD66),
+        (0xC3A6_AEEF, 0xFFFF_FEB3),
+        (0xBD4C_CF6C, 0x0000_0000),
+        (0x43A6_A222, 0x0000_014D),
+        (0x4426_A555, 0x0000_029A),
+        (0xBF73_3650, 0x0000_0000),
+    ];
+
+    /// `MOD(x, 24.0)`.
+    const MOD24: Vectors = &[
+        (0xC2C8_0000, 0xC080_0000),
+        (0xC285_5630, 0xC195_58C0),
+        (0xC205_58BF, 0xC115_62FC),
+        (0xBBA3_D923, 0xBBA3_D923),
+        (0x4205_4E82, 0x4115_3A08),
+        (0x4285_5111, 0x4195_4444),
+        (0xC2AF_FFB1, 0xC17F_FD88),
+    ];
+
     /// `x ** 0.6666667`.
     const POWR: Vectors = &[
         (0x3586_37BD, 0x38D1_B714),
@@ -265,6 +418,30 @@ mod tests {
         check("sin", SIN, sin);
         check("cos", COS, cos);
         check("tanh", TANH, tanh);
+        check("log10", LOG10, log10);
+        check("tan", TAN, tan);
+        check("asin", ASIN, asin);
+        check("acos", ACOS, acos);
+        check("atan", ATAN, atan);
+    }
+
+    /// Sign, rounding and remainder: not libm, but the Fortran semantics differ from Rust's
+    /// obvious spelling in each case.
+    #[test]
+    fn conversions_match_gfortran() {
+        check("sign(1.0, x)", SIGN1, |x| sign(1.0, x));
+        check("mod(x, 24.0)", MOD24, |x| modulo_trunc(x, 24.0));
+
+        // These two produce integers; the vectors hold the integer's own bits, so the
+        // comparison is not confused by the sign of zero.
+        for &(xb, want) in NINT {
+            let x = f32::from_bits(std::hint::black_box(xb));
+            assert_eq!(nint(x) as u32, want, "nint({x})");
+        }
+        for &(xb, want) in INT {
+            let x = f32::from_bits(std::hint::black_box(xb));
+            assert_eq!(int(x) as u32, want, "int({x})");
+        }
     }
 
     #[test]
@@ -342,6 +519,19 @@ mod tests {
         assert!(
             disagrees(POWR, &|x| (0.6666667f32 * x.ln()).exp()),
             "exp(y*log x) vs x**y"
+        );
+        // `SIGN(1.0, -0.0)` is -1.0, so the standard-looking `b >= 0.0` is wrong.
+        assert!(
+            disagrees(SIGN1, &|x| if x >= 0.0 { 1.0 } else { -1.0 }),
+            "b >= 0.0 vs SIGN"
+        );
+        // Fortran MOD is truncated, not Euclidean.
+        assert!(disagrees(MOD24, &|x| x.rem_euclid(24.0)), "rem_euclid vs MOD");
+        // NINT rounds half away from zero, not to even.
+        assert!(
+            NINT.iter()
+                .any(|&(xb, want)| f32::from_bits(xb).round_ties_even() as i32 as u32 != want),
+            "round_ties_even vs NINT"
         );
     }
 }
