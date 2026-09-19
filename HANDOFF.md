@@ -20,10 +20,10 @@ Read in this order: this file, then `PORTING.md` (per-file status), then
 
 ## 1. What exists
 
-Nine commits on `main`. **157 tests, clippy clean in debug and release, release cdylib builds.**
+Eleven commits on `main`. **163 tests, clippy clean in debug and release, release cdylib builds.**
 
 ```sh
-cargo test                  # 157, and again with --release
+cargo test                  # 163, and again with --release
 cargo clippy --all-targets  # 0 warnings
 cargo build --release       # target/release/libnoahowp_bmi.so
 ```
@@ -165,7 +165,13 @@ plausible nonsense.
 4. `c_abi.rs` + `register_bmi` -- `bmi-driver` can then load it via its **`bmi_c`** adapter
    (not `bmi_fortran`: no middleware needed, and `BmiFortran` requires all 29 symbols to
    resolve).
-5. `UtilitiesModule`, `RunModule`.
+5. ~~`UtilitiesModule`~~ -- **done**, and with it the first end-to-end proof that the
+   differential harness works: `UtilitiesMain` reproduces the Fortran bit for bit on every
+   sampled timestep of the Bondville year, and a second test checks that the *Fortran* changes
+   nothing outside the five fields the port reproduces -- an output the port had never heard of
+   would otherwise look like agreement. A separate sweep covers leap years and the slope/aspect
+   correction, neither of which Bondville reaches. `RunModule`'s timestep loop still waits on
+   the physics.
 6. Physics: water tree, then energy tree. `EtFluxModule` last -- 1503 lines with nested
    iteration loops, where any upstream ULP difference gets amplified.
 

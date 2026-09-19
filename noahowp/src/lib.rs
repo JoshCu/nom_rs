@@ -15,6 +15,10 @@
 // is exactly how a constant drifts a ULP from the Fortran's (it already happened once, to TLC
 // -- see constants.rs). Literals are copied verbatim from the Fortran, full stop.
 #![allow(clippy::excessive_precision)]
+// `approx_constant` wants `3.14159265` replaced with `PI`. They are not the same number in
+// f32, and the Fortran has two different pi literals of its own -- `ConstantsModule`'s DEGRAD
+// uses `3.1415926` while `calc_declin`'s uses `3.14159265`. Literals stay as found.
+#![allow(clippy::approx_constant)]
 
 pub mod constants;
 pub mod date_time_utils;
@@ -31,6 +35,7 @@ pub mod options;
 pub mod parameters;
 pub mod parameters_read;
 pub mod run;
+pub mod utilities;
 pub mod water;
 
 pub use layers::Shifted;

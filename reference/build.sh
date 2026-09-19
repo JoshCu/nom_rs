@@ -58,7 +58,7 @@ echo "== generating serializer =="
 
 echo "== instrumenting RunModule =="
 ./instrument.py "$BUILD/src"
-cp difftest_driver.f90 paramsweep_driver.f90 "$BUILD/src/"
+cp difftest_driver.f90 paramsweep_driver.f90 datesweep_driver.f90 "$BUILD/src/"
 
 echo "== compiling ($($FC --version | head -1)) =="
 cd "$BUILD/src"
@@ -75,7 +75,9 @@ LIB_OBJS=$(for f in $ORDER; do case $f in *_driver) ;; *) echo "$f.o" ;; esac; d
 $FC -o "$BUILD/difftest" difftest_driver.o $LIB_OBJS
 # shellcheck disable=SC2086
 $FC -o "$BUILD/paramsweep" paramsweep_driver.o $LIB_OBJS
-echo "built $BUILD/difftest and $BUILD/paramsweep"
+# shellcheck disable=SC2086
+$FC -o "$BUILD/datesweep" datesweep_driver.o $LIB_OBJS
+echo "built $BUILD/{difftest,paramsweep,datesweep}"
 
 [ "${1:-}" = "--fixtures" ] || exit 0
 
@@ -90,4 +92,5 @@ FIX=$HERE/../noahowp/tests/fixtures/difftest
 mkdir -p "$FIX"
 ./difftest run/namelist.input "$FIX/bondville.difftest" "$NSAMPLES"
 ./paramsweep run/namelist.input "$FIX/param_sweep.difftest"
-ls -lh "$FIX"/*.difftest
+./datesweep "$FIX/newdate_sweep.bin" "$FIX/declin_sweep.bin"
+ls -lh "$FIX"/*.difftest "$FIX"/*.bin

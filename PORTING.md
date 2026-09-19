@@ -70,8 +70,14 @@ Legend: **done** -- ported and tested · **stub** -- surface exists, body outsta
 | `src/ForcingType.f90` | `noahowp/src/forcing.rs` | done |
 | `src/EnergyType.f90` | `noahowp/src/energy.rs` | done |
 | `src/WaterType.f90` | `noahowp/src/water.rs` | done |
-| `src/UtilitiesModule.f90` | `noahowp/src/utilities.rs` | todo |
+| `src/UtilitiesModule.f90` | `noahowp/src/utilities.rs` | done (the shapes `UtilitiesMain` calls) |
 | `src/RunModule.f90` | `noahowp/src/run.rs` | partial -- `initialize_from_file`; the timestep loop awaits the physics |
+
+`UtilitiesModule.f90`'s `geth_newdate` and `geth_idts` handle punctuated and unpunctuated
+dates at six resolutions with fractional seconds. `UtilitiesMain` calls each exactly one way --
+a 12-character `YYYYMMDDHHMM` date with an offset in minutes, and two 10-character `YYYY-MM-DD`
+dates -- so only those shapes are ported. Anything else is a typed error; upstream reaches
+`call abort()` on most of them. The unported branches have no caller and no way to test them.
 
 `ParametersRead.f90` also contains `read_crop_parameters`, `read_irrigation_parameters`,
 `read_tiledrain_parameters` and `read_optional_parameters` -- roughly 450 lines. `paramRead`
@@ -200,7 +206,19 @@ someone tidies it up.
     Their `RunModule` assignments are commented out upstream. On the BMI path they arrive via
     `set_value` before the first `update`. (`run.rs`)
 
-15. **Integer powers go through `powi`, never through repeated multiplication.** gfortran
+15. **`calc_declin` has its own `DEGRAD`, and it is not the one in `ConstantsModule`.**
+    The local parameter is `3.14159265/180.`; the module constant uses the literal `3.1415926`,
+    one digit shorter. Two constants, same name, different value. (`utilities.rs`)
+
+16. **`nfeb` has a 3600-year rule**, which is not part of the Gregorian calendar. It changes
+    nothing before the year 3600 and is reproduced rather than corrected. `calc_declin`
+    open-codes the same rule a second time for `yearlen`. (`utilities.rs`)
+
+17. **`idt = itime * (domain%dt / 60)` divides in real and truncates on assignment.**
+    Computing `itime * dt / 60` in integers rounds differently for any `dt` that is not a whole
+    number of minutes. (`utilities.rs`)
+
+18. **Integer powers go through `powi`, never through repeated multiplication.** gfortran
    expands `x ** n` by squaring, so `x * x * x * x` is a different computation from `x ** 4`
    and disagrees on 34% of inputs. `powf` is also not a substitute, and looks correct in
    release builds only because LLVM folds it into a multiply. (`fortran/intrinsics.rs`)

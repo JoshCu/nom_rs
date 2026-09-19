@@ -56,6 +56,24 @@ the sentinel -- and the infinities the derived parameters then take -- is part o
 It earns its keep: a 1-ULP error from writing `kdt` as `refkdt * (dksat(1) / refdk)` instead of
 `refkdt * dksat(1) / refdk` shows up in 16 sweep cases and in none of the Bondville ones.
 
+## The date sweep
+
+`datesweep` writes `newdate_sweep.bin` and `declin_sweep.bin`. Replaying Bondville covers one
+year at one location on flat ground, which exercises neither leap-year handling nor the
+slope/aspect correction in `calc_declin` -- both live code the port has to get right.
+
+The sweep walks them directly: eight start dates chosen around leap years, the century and
+400-year exceptions and year boundaries, times fourteen offsets in both directions; and a solar
+geometry grid over month, hour, latitude, longitude, slope and azimuth (20,160 cases).
+
+Both files are fixed-width records with no framing, since the layouts do not change and the
+reader knows them:
+
+```text
+newdate: odate(12) idt(i4) ndate(12)
+declin:  nowdate(19) lat lon slope azimuth cosz cosz_horiz julian (7 x r4) yearlen(i4)
+```
+
 ## Why it is built this way
 
 **No BMI, no ngen, no NetCDF.** `noah-owp-modular` has no CMake of its own; `libsurfacebmi.so`
