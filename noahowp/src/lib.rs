@@ -20,7 +20,9 @@ pub mod constants;
 pub mod date_time_utils;
 pub mod difftest;
 pub mod domain;
+pub mod energy;
 pub mod error_check;
+pub mod forcing;
 pub mod fortran;
 pub mod layers;
 pub mod levels;
@@ -28,6 +30,8 @@ pub mod namelist_read;
 pub mod options;
 pub mod parameters;
 pub mod parameters_read;
+pub mod run;
+pub mod water;
 
 pub use layers::Shifted;
 pub use namelist_read::{ConfigError, NamelistConfig};

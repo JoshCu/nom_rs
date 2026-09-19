@@ -20,10 +20,10 @@ Read in this order: this file, then `PORTING.md` (per-file status), then
 
 ## 1. What exists
 
-Eight commits on `main`. **156 tests, clippy clean in debug and release, release cdylib builds.**
+Nine commits on `main`. **157 tests, clippy clean in debug and release, release cdylib builds.**
 
 ```sh
-cargo test                  # 156, and again with --release
+cargo test                  # 157, and again with --release
 cargo clippy --all-targets  # 0 warnings
 cargo build --release       # target/release/libnoahowp_bmi.so
 ```
@@ -154,7 +154,13 @@ plausible nonsense.
    unreachable from the BMI path. The sweep earns its keep: writing `kdt` as
    `refkdt * (dksat(1) / refdk)` instead of `refkdt * dksat(1) / refdk` is 1 ULP out in 16
    sweep cases and in none of the Bondville ones.
-2. `ForcingType`, `EnergyType`, `WaterType` -- plain data, mechanical.
+2. ~~`ForcingType`, `EnergyType`, `WaterType`~~ -- **done**, together with
+   `RunModule::initialize_from_file`. The whole initial state -- `domain`, `forcing`, `energy`,
+   `water`, 220-odd fields -- matches the Fortran bit for bit at the first timestep
+   (`tests/initial_state_vs_fortran.rs`). Three groups are excluded and each is scope, not
+   oversight: the eight forcings the ASCII reader supplies (they arrive via `set_value`),
+   `domain%curr_datetime` (assigned at the top of `solve_noahowp`), and `domain%sim_datetimes`
+   (omitted from the fixtures as one f64 per timestep).
 3. `get_value` / `set_value` -- now unblocked. Watch the two traps in §4 below.
 4. `c_abi.rs` + `register_bmi` -- `bmi-driver` can then load it via its **`bmi_c`** adapter
    (not `bmi_fortran`: no middleware needed, and `BmiFortran` requires all 29 symbols to

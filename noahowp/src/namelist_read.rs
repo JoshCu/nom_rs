@@ -38,6 +38,14 @@ pub enum ConfigError {
     TableTooLarge { what: &'static str, value: i32, max: i32 },
     /// A parameter table did not have the structure its reader expects.
     Table { file: &'static str, source: ReadError },
+    /// A date in the namelist could not be parsed or converted.
+    Date(crate::date_time_utils::DateError),
+}
+
+impl From<crate::date_time_utils::DateError> for ConfigError {
+    fn from(e: crate::date_time_utils::DateError) -> Self {
+        ConfigError::Date(e)
+    }
 }
 
 impl fmt::Display for ConfigError {
@@ -64,6 +72,7 @@ impl fmt::Display for ConfigError {
                 write!(f, "{what} is {value}, more than the {max} rows the table holds")
             }
             ConfigError::Table { file, source } => write!(f, "{file}: {source}"),
+            ConfigError::Date(e) => write!(f, "{e}"),
         }
     }
 }

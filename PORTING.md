@@ -67,11 +67,11 @@ Legend: **done** -- ported and tested · **stub** -- surface exists, body outsta
 | `src/DateTimeUtilsModule.f90` | `noahowp/src/date_time_utils.rs` | done (date routines only) |
 | `src/ParametersRead.f90` | `noahowp/src/parameters_read.rs` | done (the four readers `paramRead` calls) |
 | `src/ParametersType.f90` | `noahowp/src/parameters.rs` | done |
-| `src/ForcingType.f90` | `noahowp/src/forcing.rs` | todo |
-| `src/EnergyType.f90` | `noahowp/src/energy.rs` | todo |
-| `src/WaterType.f90` | `noahowp/src/water.rs` | todo |
+| `src/ForcingType.f90` | `noahowp/src/forcing.rs` | done |
+| `src/EnergyType.f90` | `noahowp/src/energy.rs` | done |
+| `src/WaterType.f90` | `noahowp/src/water.rs` | done |
 | `src/UtilitiesModule.f90` | `noahowp/src/utilities.rs` | todo |
-| `src/RunModule.f90` | `noahowp/src/run.rs` | todo |
+| `src/RunModule.f90` | `noahowp/src/run.rs` | partial -- `initialize_from_file`; the timestep loop awaits the physics |
 
 `ParametersRead.f90` also contains `read_crop_parameters`, `read_irrigation_parameters`,
 `read_tiledrain_parameters` and `read_optional_parameters` -- roughly 450 lines. `paramRead`
@@ -187,7 +187,20 @@ someone tidies it up.
     rather than rejecting the index, and `every_table_row_matches_the_fortran` covers it.
     (`parameters.rs`)
 
-12. **Integer powers go through `powi`, never through repeated multiplication.** gfortran
+12. **`energy%TGV` is initialised by nothing.** Neither `EnergyType::InitDefault` nor
+    `RunModule` assigns it, so the Fortran reads whatever the allocation left there until the
+    physics first writes it. The reference build leaves it zero -- fresh pages -- and the
+    fixtures record that, so the port uses zero. This is the one value that depends on the
+    compiler rather than on the source. (`energy.rs`)
+
+13. **`forcing%SWDOWN` is skipped by `InitDefault` and set by `RunModule` instead.** It keeps
+    `huge(1.0)` in between, which nothing observes. (`forcing.rs`)
+
+14. **The eight forcings the ASCII reader supplies keep `huge(1.0)` through initialisation.**
+    Their `RunModule` assignments are commented out upstream. On the BMI path they arrive via
+    `set_value` before the first `update`. (`run.rs`)
+
+15. **Integer powers go through `powi`, never through repeated multiplication.** gfortran
    expands `x ** n` by squaring, so `x * x * x * x` is a different computation from `x ** 4`
    and disagrees on 34% of inputs. `powf` is also not a substitute, and looks correct in
    release builds only because LLVM folds it into a multiply. (`fortran/intrinsics.rs`)
