@@ -141,6 +141,33 @@ impl ListDirectedReader {
         })
     }
 
+    /// `READ (u,*) i, a, b, ...` -- one statement whose first item is an integer and whose
+    /// remaining items are reals.
+    ///
+    /// This is the shape of a `SOILPARM.TBL` row: the texture index followed by its
+    /// parameters. Reading it as one statement matters, because a statement boundary is what
+    /// discards the rest of the record -- the trailing `'SAND'` label here.
+    pub fn read_int_then_reals(&mut self, first: &mut i32, rest: &mut [f32]) -> Result<(), ReadError> {
+        self.begin_statement();
+        match self.next_item() {
+            Some(Item::Value(v)) => *first = parse_int(&v)?,
+            Some(Item::Null) => {}
+            Some(Item::Terminate) | None => {
+                return Err(ReadError::EndOfFile { wanted: "an integer" })
+            }
+        }
+        for slot in rest.iter_mut() {
+            match self.next_item() {
+                Some(Item::Value(v)) => *slot = parse_real32(&v)?,
+                Some(Item::Null) => {}
+                Some(Item::Terminate) => break,
+                None => return Err(ReadError::EndOfFile { wanted: "reals" }),
+            }
+        }
+        self.end_statement();
+        Ok(())
+    }
+
     /// `READ (u,*) l`.
     pub fn read_logical(&mut self) -> Result<bool, ReadError> {
         self.begin_statement();

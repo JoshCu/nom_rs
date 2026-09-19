@@ -38,6 +38,24 @@ Sampling covers the first 24 timesteps consecutively -- spin-up, where the state
 a small slice of 17,522 timesteps, and a fixture set drawn from a single window would never
 reach the snow physics at all.
 
+## The parameter sweep
+
+`paramsweep` writes a second fixture, `param_sweep.difftest`. Bondville exercises exactly one
+vegetation type, one soil texture and one soil colour, which leaves most of every table unread
+-- a column misread in the port would not show up. The sweep walks each class index in turn,
+under both vegetation classifications.
+
+One dimension at a time rather than the full cross product: the indices select independent
+table rows, and the only expressions that mix them (`kdt`, `frzx`) are functions of the soil row
+alone. 65 cases per dataset instead of 6,480, for the same coverage of every table entry.
+
+Indices deliberately run past the number of rows the file supplies, up to the declared table
+size, because that is in bounds for the Fortran and returns the `-1.E36` sentinel. Reproducing
+the sentinel -- and the infinities the derived parameters then take -- is part of the contract.
+
+It earns its keep: a 1-ULP error from writing `kdt` as `refkdt * (dksat(1) / refdk)` instead of
+`refkdt * dksat(1) / refdk` shows up in 16 sweep cases and in none of the Bondville ones.
+
 ## Why it is built this way
 
 **No BMI, no ngen, no NetCDF.** `noah-owp-modular` has no CMake of its own; `libsurfacebmi.so`

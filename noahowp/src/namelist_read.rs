@@ -5,6 +5,7 @@
 //! driver can report it rather than take the process down.
 
 use crate::error_check::is_within_bound;
+use crate::fortran::list_directed::ReadError;
 use crate::fortran::namelist::{Namelist, NamelistError};
 use crate::layers::Shifted;
 use core::fmt;
@@ -23,6 +24,20 @@ pub enum ConfigError {
     MissingEntry(&'static str),
     /// A model option fell outside its documented range.
     OptionOutOfRange { name: &'static str, value: i32, lo: i32, hi: i32 },
+    /// A parameter table file was missing a namelist group the reader needs.
+    MissingGroup { file: &'static str, group: &'static str },
+    /// `veg_class_name` named a dataset with no matching group in `MPTABLE.TBL`.
+    ///
+    /// `read_veg_parameters` reaches `handle_err` here, which stops the process.
+    UnknownVegDataset(String),
+    /// `soil_class_name` was not found in the first 100 records of `SOILPARM.TBL`.
+    SoilClassNotFound(String),
+    /// A table declared more rows than the Fortran's fixed-size array can hold.
+    ///
+    /// The Fortran would write past the end of the table instead.
+    TableTooLarge { what: &'static str, value: i32, max: i32 },
+    /// A parameter table did not have the structure its reader expects.
+    Table { file: &'static str, source: ReadError },
 }
 
 impl fmt::Display for ConfigError {
@@ -36,6 +51,19 @@ impl fmt::Display for ConfigError {
             ConfigError::OptionOutOfRange { name, value, lo, hi } => {
                 write!(f, "model options: {name} should be {lo}-{hi}, got {value}")
             }
+            ConfigError::MissingGroup { file, group } => {
+                write!(f, "{file}: no &{group} group")
+            }
+            ConfigError::UnknownVegDataset(name) => {
+                write!(f, "unrecognized veg_class_name {name:?}")
+            }
+            ConfigError::SoilClassNotFound(name) => {
+                write!(f, "SOILPARM.TBL: soil class {name:?} not found")
+            }
+            ConfigError::TableTooLarge { what, value, max } => {
+                write!(f, "{what} is {value}, more than the {max} rows the table holds")
+            }
+            ConfigError::Table { file, source } => write!(f, "{file}: {source}"),
         }
     }
 }

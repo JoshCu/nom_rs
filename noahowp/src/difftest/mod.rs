@@ -26,7 +26,7 @@
 
 pub mod manifest;
 
-use manifest::{Field, Kind, Shape, MAGIC, PER_RECORD, STATIC};
+use manifest::{Field, Kind, Shape, MAGIC, PARAM_SWEEP, PER_RECORD, STATIC};
 use std::collections::HashMap;
 use std::fmt;
 
@@ -319,6 +319,67 @@ impl Fixture {
 
         Ok(Fixture { statics, records })
     }
+}
+
+/// Which vegetation classification a sweep case used.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum VegDataset {
+    Usgs,
+    ModifiedIgbpModisNoah,
+}
+
+impl VegDataset {
+    /// The string `veg_class_name` must hold to select this dataset.
+    pub fn name(self) -> &'static str {
+        match self {
+            VegDataset::Usgs => "USGS",
+            VegDataset::ModifiedIgbpModisNoah => "MODIFIED_IGBP_MODIS_NOAH",
+        }
+    }
+
+    fn from_tag(tag: i32) -> Result<Self, FixtureError> {
+        match tag {
+            1 => Ok(VegDataset::Usgs),
+            2 => Ok(VegDataset::ModifiedIgbpModisNoah),
+            other => Err(FixtureError::UnknownTag(other)),
+        }
+    }
+}
+
+/// One case of the parameter sweep: the class indices, and the parameters they produced.
+///
+/// Bondville exercises a single `(vegtyp, isltyp, soilcolor)`, which leaves most of every table
+/// unread. The sweep walks each index in turn -- including past the number of rows the file
+/// supplies, where the Fortran legitimately returns its `-1.E36` sentinel.
+#[derive(Debug, Clone)]
+pub struct ParamCase {
+    pub dataset: VegDataset,
+    pub vegtyp: i32,
+    pub isltyp: i32,
+    pub soilcolor: i32,
+    pub parameters: State,
+}
+
+/// Parse a parameter-sweep fixture.
+pub fn parse_param_sweep(data: &[u8]) -> Result<Vec<ParamCase>, FixtureError> {
+    let mut p = Parser { data, at: 0 };
+    let mut cases = Vec::new();
+    while p.at < p.data.len() {
+        p.magic()?;
+        let dataset = VegDataset::from_tag(p.i32()?)?;
+        let vegtyp = p.i32()?;
+        let isltyp = p.i32()?;
+        let soilcolor = p.i32()?;
+        let (name, fields) = PARAM_SWEEP[0];
+        cases.push(ParamCase {
+            dataset,
+            vegtyp,
+            isltyp,
+            soilcolor,
+            parameters: p.state(name, fields)?,
+        });
+    }
+    Ok(cases)
 }
 
 struct Parser<'a> {

@@ -59,6 +59,9 @@ pub const PER_RECORD: &[(&str, &[Field])] = &[("domain", DOMAIN), ("forcing", FO
 /// The types written once, after initialisation.
 pub const STATIC: &[(&str, &[Field])] = &[("levels", LEVELS), ("options", OPTIONS), ("parameters", PARAMETERS)];
 
+/// The type written per parameter-sweep case, after the four class indices.
+pub const PARAM_SWEEP: &[(&str, &[Field])] = &[("parameters", PARAMETERS)];
+
 /// Fields of `domain_type`, in the order `DiffTestModule` writes them.
 pub const DOMAIN: &[Field] = &[
     Field { name: "iloc", kind: Kind::I4, shape: Shape::Scalar },

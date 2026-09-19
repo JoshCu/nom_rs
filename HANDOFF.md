@@ -20,10 +20,10 @@ Read in this order: this file, then `PORTING.md` (per-file status), then
 
 ## 1. What exists
 
-Seven commits on `main`. **140 tests, clippy clean in debug and release, release cdylib builds.**
+Eight commits on `main`. **156 tests, clippy clean in debug and release, release cdylib builds.**
 
 ```sh
-cargo test                  # 140, and again with --release
+cargo test                  # 156, and again with --release
 cargo clippy --all-targets  # 0 warnings
 cargo build --release       # target/release/libnoahowp_bmi.so
 ```
@@ -147,11 +147,13 @@ plausible nonsense.
 
 `PORTING.md` has the full table. The order that keeps things verifiable:
 
-1. `ParametersRead` + `ParametersType` -- the readers are done, so this is table assembly plus
-   secondary-parameter derivation. The fixture's static block already holds the Fortran's fully
-   assembled `parameters` for the Bondville config, so `Fixture::static_state("parameters")` is
-   a ready-made assertion for all 134 fields. Then widen to the full cross product of
-   `(veg_class_name, veg type 1..27, soil class 1..30)`; §6.3 of the plan.
+1. ~~`ParametersRead` + `ParametersType`~~ -- **done.** All 134 fields agree with the Fortran
+   bit for bit, over Bondville and a 130-case sweep of every table row under both vegetation
+   classifications (`reference/paramsweep_driver.f90`). Only the four readers `paramRead`
+   actually calls are ported; the crop, irrigation, tiledrain and optional readers are
+   unreachable from the BMI path. The sweep earns its keep: writing `kdt` as
+   `refkdt * (dksat(1) / refdk)` instead of `refkdt * dksat(1) / refdk` is 1 ULP out in 16
+   sweep cases and in none of the Bondville ones.
 2. `ForcingType`, `EnergyType`, `WaterType` -- plain data, mechanical.
 3. `get_value` / `set_value` -- now unblocked. Watch the two traps in §4 below.
 4. `c_abi.rs` + `register_bmi` -- `bmi-driver` can then load it via its **`bmi_c`** adapter

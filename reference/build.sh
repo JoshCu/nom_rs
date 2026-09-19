@@ -58,7 +58,7 @@ echo "== generating serializer =="
 
 echo "== instrumenting RunModule =="
 ./instrument.py "$BUILD/src"
-cp difftest_driver.f90 "$BUILD/src/"
+cp difftest_driver.f90 paramsweep_driver.f90 "$BUILD/src/"
 
 echo "== compiling ($($FC --version | head -1)) =="
 cd "$BUILD/src"
@@ -69,9 +69,13 @@ ORDER=$(python3 "$HERE/compile_order.py" .)
 for f in $ORDER; do
   $FC $FFLAGS -c "$f.f90" -o "$f.o" 2>&1 | grep -vE "Legacy Extension|GOTO statement|^\s*[0-9]+ \||^\s*\||^\s*$|Warning:" || true
 done
+# Each driver is a `program`, so they cannot be linked into the same binary.
+LIB_OBJS=$(for f in $ORDER; do case $f in *_driver) ;; *) echo "$f.o" ;; esac; done)
 # shellcheck disable=SC2086
-$FC -o "$BUILD/difftest" $(for f in $ORDER; do echo "$f.o"; done)
-echo "built $BUILD/difftest"
+$FC -o "$BUILD/difftest" difftest_driver.o $LIB_OBJS
+# shellcheck disable=SC2086
+$FC -o "$BUILD/paramsweep" paramsweep_driver.o $LIB_OBJS
+echo "built $BUILD/difftest and $BUILD/paramsweep"
 
 [ "${1:-}" = "--fixtures" ] || exit 0
 
@@ -85,4 +89,5 @@ git -C "$NOM_SRC" show "$NOM_COMMIT:run/namelist.input" \
 FIX=$HERE/../noahowp/tests/fixtures/difftest
 mkdir -p "$FIX"
 ./difftest run/namelist.input "$FIX/bondville.difftest" "$NSAMPLES"
-ls -lh "$FIX/bondville.difftest"
+./paramsweep run/namelist.input "$FIX/param_sweep.difftest"
+ls -lh "$FIX"/*.difftest

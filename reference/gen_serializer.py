@@ -168,7 +168,7 @@ module DiffTestModule
 
   implicit none
   private
-  public :: dt_open, dt_close, dt_arm, dt_record, dt_static
+  public :: dt_open, dt_close, dt_arm, dt_record, dt_static, dt_params
 
   integer, parameter :: DT_UNIT = 71
   integer, parameter :: DT_MAGIC = {magic}   ! 'NOMD'
@@ -212,6 +212,19 @@ contains
     write(DT_UNIT) itime
 {per}
   end subroutine dt_record
+
+  ! One parameter-sweep case: the class indices, then the parameters they produced.
+  subroutine dt_params(dataset, vegtyp, isltyp, soilcolor, parameters)
+    integer, intent(in) :: dataset, vegtyp, isltyp, soilcolor
+    type(parameters_type), intent(in) :: parameters
+    if (.not. dt_open_) return
+    write(DT_UNIT) DT_MAGIC
+    write(DT_UNIT) dataset
+    write(DT_UNIT) vegtyp
+    write(DT_UNIT) isltyp
+    write(DT_UNIT) soilcolor
+    call dt_dump_parameters(parameters)
+  end subroutine dt_params
 
   ! The run configuration, written once after initialisation.
   subroutine dt_static({static_args})
@@ -312,6 +325,9 @@ pub const PER_RECORD: &[(&str, &[Field])] = &[{per}];
 
 /// The types written once, after initialisation.
 pub const STATIC: &[(&str, &[Field])] = &[{static}];
+
+/// The type written per parameter-sweep case, after the four class indices.
+pub const PARAM_SWEEP: &[(&str, &[Field])] = &[("parameters", PARAMETERS)];
 
 {tables}
 """

@@ -26,6 +26,8 @@ pub mod layers;
 pub mod levels;
 pub mod namelist_read;
 pub mod options;
+pub mod parameters;
+pub mod parameters_read;
 
 pub use layers::Shifted;
 pub use namelist_read::{ConfigError, NamelistConfig};

@@ -65,13 +65,19 @@ Legend: **done** -- ported and tested · **stub** -- surface exists, body outsta
 | `src/NamelistRead.f90` | `noahowp/src/namelist_read.rs` | done |
 | `src/ErrorCheckModule.f90` | `noahowp/src/error_check.rs` | done |
 | `src/DateTimeUtilsModule.f90` | `noahowp/src/date_time_utils.rs` | done (date routines only) |
-| `src/ParametersRead.f90` | `noahowp/src/parameters_read.rs` | todo |
-| `src/ParametersType.f90` | `noahowp/src/parameters.rs` | todo |
+| `src/ParametersRead.f90` | `noahowp/src/parameters_read.rs` | done (the four readers `paramRead` calls) |
+| `src/ParametersType.f90` | `noahowp/src/parameters.rs` | done |
 | `src/ForcingType.f90` | `noahowp/src/forcing.rs` | todo |
 | `src/EnergyType.f90` | `noahowp/src/energy.rs` | todo |
 | `src/WaterType.f90` | `noahowp/src/water.rs` | todo |
 | `src/UtilitiesModule.f90` | `noahowp/src/utilities.rs` | todo |
 | `src/RunModule.f90` | `noahowp/src/run.rs` | todo |
+
+`ParametersRead.f90` also contains `read_crop_parameters`, `read_irrigation_parameters`,
+`read_tiledrain_parameters` and `read_optional_parameters` -- roughly 450 lines. `paramRead`
+calls none of them, and nothing else can reach their tables, so they are out of scope
+(`crop_model_option = 0` is the only supported value). They become reachable only if upstream
+starts transferring those tables into `parameters_type`.
 
 `DateTimeUtilsModule.f90` also vendors a general string-utility library (`parse`, `compact`,
 `removesp`, `shiftstr`, `insertstr`, `delsubstr`, `uppercase`, `readline`, `match`, `write_*`,
@@ -166,7 +172,22 @@ someone tidies it up.
    `ParametersType::paramRead`. Upstream can update one copy and not the other.
    (outstanding -- lands with `parameters.rs`)
 
-8. **Integer powers go through `powi`, never through repeated multiplication.** gfortran
+8. **`NROOT_TABLE` is `real`; `parameters%NROOT` is `integer`.** The assignment truncates
+   toward zero, which `as i32` reproduces. (`parameters.rs`)
+
+9. **`paramRead` overwrites `TOPT` with `1.E-06` after reading `TOPT_TABLE`.** The table value
+   is read from `MPTABLE.TBL` and discarded, and `1.E-06` is not a plausible "optimum
+   transpiration air temperature [K]". It is reproduced as written. (`parameters.rs`)
+
+10. **`SHDMAX` is assigned from `SHDFAC_TABLE`**, the same table entry as `SHDFAC`, so the
+    annual maximum and the current value are always equal. (`parameters.rs`)
+
+11. **A class index between the rows supplied and the declared table size is legal** and reads
+    back the `-1.E36` sentinel; `kdt` and `frzx` then go infinite. The port reproduces this
+    rather than rejecting the index, and `every_table_row_matches_the_fortran` covers it.
+    (`parameters.rs`)
+
+12. **Integer powers go through `powi`, never through repeated multiplication.** gfortran
    expands `x ** n` by squaring, so `x * x * x * x` is a different computation from `x ** 4`
    and disagrees on 34% of inputs. `powf` is also not a substitute, and looks correct in
    release builds only because LLVM folds it into a multiply. (`fortran/intrinsics.rs`)
