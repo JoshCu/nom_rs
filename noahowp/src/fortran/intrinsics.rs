@@ -201,6 +201,11 @@ pub fn max(a: f32, b: f32) -> f32 {
     a.max(b)
 }
 
+// Neither of these is commutative. `MAX(-0.0, 0.0)` is `+0.0` and `MAX(0.0, -0.0)` is `-0.0`,
+// on both sides -- so a ported call has to keep the Fortran's argument order, not just its
+// arguments. `InterceptionModule`'s `MAX(water%QINTR, 0.)` reaches this on 9 of 200 sampled
+// Bondville timesteps, where QINTR is -0.0.
+
 #[cfg(test)]
 mod tests {
     use super::*;

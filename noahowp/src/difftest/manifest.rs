@@ -54,7 +54,7 @@ pub struct Field {
 pub const MAGIC: u32 = 0x4e4f4d44;
 
 /// The types written in each per-call record, in order.
-pub const PER_RECORD: &[(&str, &[Field])] = &[("domain", DOMAIN), ("forcing", FORCING), ("energy", ENERGY), ("water", WATER)];
+pub const PER_RECORD: &[(&str, &[Field])] = &[("domain", DOMAIN), ("forcing", FORCING), ("energy", ENERGY), ("water", WATER), ("paramstate", PARAMSTATE)];
 
 /// The types written once, after initialisation.
 pub const STATIC: &[(&str, &[Field])] = &[("levels", LEVELS), ("options", OPTIONS), ("parameters", PARAMETERS)];
@@ -328,6 +328,17 @@ pub const WATER: &[Field] = &[
     Field { name: "EPORE", kind: Kind::R4, shape: Shape::Alloc },
     Field { name: "FSNO", kind: Kind::R4, shape: Shape::Scalar },
     Field { name: "BTRAN", kind: Kind::R4, shape: Shape::Scalar },
+];
+
+/// Fields of `paramstate_type`, in the order `DiffTestModule` writes them.
+pub const PARAMSTATE: &[Field] = &[
+    Field { name: "LAI", kind: Kind::R4, shape: Shape::Scalar },
+    Field { name: "SAI", kind: Kind::R4, shape: Shape::Scalar },
+    Field { name: "ELAI", kind: Kind::R4, shape: Shape::Scalar },
+    Field { name: "ESAI", kind: Kind::R4, shape: Shape::Scalar },
+    Field { name: "VAI", kind: Kind::R4, shape: Shape::Scalar },
+    Field { name: "VEG", kind: Kind::L4, shape: Shape::Scalar },
+    Field { name: "FVEG", kind: Kind::R4, shape: Shape::Scalar },
 ];
 
 /// Fields of `levels_type`, in the order `DiffTestModule` writes them.

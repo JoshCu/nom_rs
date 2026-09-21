@@ -27,7 +27,7 @@ CALLS = [
     (5, "WaterMain"),
 ]
 
-DUMP = "call dt_record({tag}, {phase}, domain%itime, domain, forcing, energy, water)"
+DUMP = "call dt_record({tag}, {phase}, domain%itime, domain, forcing, energy, water, parameters)"
 
 
 def main():

@@ -108,6 +108,37 @@ under -- the sweep rebuilds `options` and `parameters` per `OPT_SNF`, because `p
 resolves `rain_snow_thresh` from the option and poking `options%opt_snf` alone would leave the
 threshold wrong.
 
+## The interception sweep
+
+`interceptsweep` writes `intercept_sweep.difftest`. Bondville runs
+`dynamic_veg_option = 1, vegtyp = 1, croptype = 0` for the whole year, which leaves eight of the
+nine `dveg` branches in `PHENOLOGY` unreached, along with the southern-hemisphere day-of-year
+shift, the short-canopy snow-burial formula, the water/barren/ice/urban zeroing and the crop
+path -- and, because LAI and SAI never reach zero there, the entire buried-canopy branch of
+`CanopyWaterIntercept`.
+
+Three phases:
+
+1. **Branch coverage** -- all nine `dveg` options crossed with seven vegetation types (Bondville's,
+   the four that zero LAI and SAI outright, and two short canopies that take the `SNOWHC` branch)
+   and both crop settings, two cases each.
+2. **Numerical depth** -- one tall canopy and one short one, with the canopy water balance swept
+   over snow depth, rainfall, snowfall, canopy storage and timestep length.
+3. **The 0.05 cutoffs** -- run under `dveg = 2`, because 1, 3 and 4 overwrite LAI and SAI from
+   the monthly tables on entry and a hand-set value never survives to be tested.
+
+That third phase is the fiddly one. `ESAI` and `ELAI` are never assigned directly -- they are
+`SAI` and `LAI` scaled by the unburied fraction -- and `SAI` below 0.05 is zeroed *before* they
+are computed, so the only way to land `ESAI` just under its own cutoff is to start above it and
+let the snow take the difference. `ELAI` is worse: with LAI and SAI equal, `ESAI` is zeroed
+first and `ESAI == 0.0` then forces `ELAI` to zero whichever way `ELAI`'s own comparison falls,
+masking it entirely. It needs a second pass with the stem area well clear of its cutoff. Both
+passes sweep snow depth rather than solving for one value, since the burial fraction depends on
+the canopy heights of whichever vegetation type the case selected.
+
+The configuration travels in the record id as
+`((dveg * 32 + vegtyp) * 2 + croptype) * 100 + sample`.
+
 ## Why it is built this way
 
 **No BMI, no ngen, no NetCDF.** `noah-owp-modular` has no CMake of its own; `libsurfacebmi.so`

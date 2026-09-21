@@ -94,9 +94,11 @@ contains
     integer, intent(inout) :: ncase
     integer :: id
     id = isnf * 100000 + ncase
-    call dt_record(2, 0, id, model%domain, model%forcing, model%energy, model%water)
+    call dt_record(2, 0, id, model%domain, model%forcing, model%energy, model%water, &
+                   model%parameters)
     call ForcingMain(model%options, model%parameters, model%forcing, model%energy, model%water)
-    call dt_record(2, 1, id, model%domain, model%forcing, model%energy, model%water)
+    call dt_record(2, 1, id, model%domain, model%forcing, model%energy, model%water, &
+                   model%parameters)
     ncase = ncase + 1
   end subroutine run_case
 

@@ -97,7 +97,7 @@ only `parse_date`, `julian_date`, `calendar_date`, `date_to_unix`, `unix_to_date
 |---|---|---|
 | `src/ForcingModule.f90` | `noahowp/src/physics/forcing_main.rs` | done |
 | `src/AtmProcessing.f90` | `noahowp/src/physics/atm_processing.rs` | done |
-| `src/InterceptionModule.f90` | `physics/interception.rs` | todo |
+| `src/InterceptionModule.f90` | `noahowp/src/physics/interception.rs` | done |
 | `src/EnergyModule.f90` | `physics/energy_main.rs` | todo |
 | `src/EtFluxModule.f90` | `physics/et_flux.rs` | todo |
 | `src/AlbedoModule.f90` | `physics/albedo.rs` | todo |
@@ -130,6 +130,19 @@ difference in either is invisible unless the value lands exactly on the threshol
 still ported through the measured spellings -- but a mutation to them survives both fixtures,
 and that is a property of the model rather than a gap in the fixtures.
 
+
+`InterceptionModule.f90` is verified against the Bondville year
+(`tests/interception_vs_fortran.rs`) and against a sweep of all nine `dveg` branches, the four
+special vegetation types and the crop path (`tests/intercept_sweep_vs_fortran.rs`). Bondville
+runs `dveg = 1, vegtyp = 1, croptype = 0`, which leaves eight of the nine branches unreached
+and never drives LAI to zero, so the whole buried-canopy path is sweep-only.
+
+One comparison in `PHENOLOGY` is not reachable by any fixture: the `FVEG <= 0.05` floor differs
+from `FVEG < 0.05` only when FVEG is *exactly* 0.05, which under `dveg` 1/6/7 would need a
+`SHDFAC` table entry of 0.05 (there is none) and under 2/3/8 would need
+`1 - exp(-0.52 * (LAI + SAI))` to round to exactly 0.05 -- and LAI and SAI have both already
+been floored at 0.05 by then, so their sum cannot get low enough. The comparison is copied
+verbatim; there is nothing to test it with.
 
 ### BMI
 
@@ -269,3 +282,16 @@ someone tidies it up.
 23. **The comments on `O2PP` and `CO2PP` are swapped upstream.** `O2PP` is commented "co2
    concentration" and `CO2PP` "o2 concentration". The assignments are right; only the comments
    are crossed. (`physics/atm_processing.rs`)
+
+24. **`MIN` and `MAX` are not commutative.** `MAX(-0.0, 0.0)` is `+0.0` and `MAX(0.0, -0.0)` is
+   `-0.0`, on both sides. A ported call must keep the Fortran's argument order, not merely its
+   arguments. `InterceptionModule`'s `MAX(water%QINTR, 0.)` hits this on 9 of 200 sampled
+   Bondville timesteps. (`fortran/intrinsics.rs`, `physics/interception.rs`)
+
+25. **`parameters_type` is not all parameters.** The physics writes seven of its components
+   every timestep -- `LAI`, `SAI`, `ELAI`, `ESAI` and `FVEG` in `PHENOLOGY`, `VAI` and `VEG` in
+   `EnergyModule` -- so they are per-timestep state wearing a parameter's name. The fixture
+   records them per record as `paramstate`, and the set is *derived* by scanning the physics
+   for `parameters%X =` rather than listed, so an eighth added upstream is picked up rather
+   than silently recorded once and checked never.
+   (`reference/gen_serializer.py`, `physics/interception.rs`)
