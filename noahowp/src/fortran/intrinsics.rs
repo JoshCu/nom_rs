@@ -185,20 +185,43 @@ pub fn pow2_real(x: f32) -> f32 {
 
 /// Fortran `MIN(a, b)` for reals.
 ///
-/// The obvious spelling, and measured rather than assumed: Fortran does not define `MIN` when
-/// an argument is NaN, and leaves the sign of the result unspecified when the arguments are
-/// `+0.0` and `-0.0`. gfortran agrees with IEEE `minNum` -- which is `f32::min` -- on both.
-/// `if a < b { a } else { b }` also agrees; `if a <= b { a } else { b }` does not, returning
-/// `+0.0` where gfortran returns `-0.0`.
+/// Spelled as a comparison rather than as `f32::min`, so that the result on a tie is fixed by
+/// this source and not by LLVM: **the second argument wins when the two compare equal or when
+/// the first is NaN.** Fortran does not define `MIN` when an argument is NaN, and leaves the
+/// sign of the result unspecified when the arguments are `+0.0` and `-0.0`; the spike measured
+/// gfortran returning the second argument in both cases, and `f32::min` happened to agree --
+/// but `llvm.minnum` documents "either one" for the zeros, so the agreement was luck, not a
+/// contract. `if a <= b { a } else { b }` does not agree: it returns `-0.0` where gfortran
+/// returns `+0.0`.
+///
+/// # Ties are decided by GCC, per call site
+///
+/// The spike's "second argument wins" holds for `MIN(x, 0.0)` and `MAX(x, 0.0)`, where the
+/// constant is second. It does **not** hold in general: gfortran lowers `MIN` to a `MIN_EXPR`
+/// that the middle end treats as commutative, so which operand lands where depends on
+/// constant canonicalisation, SSA numbering and inlining at that site. `EtFluxModule`'s
+/// `MIN(CANLIQ*LATHEAV/DT, EVC)` comes back with the *first* argument's zero in the reference
+/// build. A ported call therefore keeps the Fortran's argument order by default, and swaps it
+/// -- with a comment naming this paragraph -- where the fixtures show the reference binary
+/// resolved a tie the other way. Nothing else in the value is affected; only the sign of a
+/// zero, which `SIGN`, `MAX(x, 0.)` and division can then propagate.
 #[inline]
 pub fn min(a: f32, b: f32) -> f32 {
-    a.min(b)
+    if a < b {
+        a
+    } else {
+        b
+    }
 }
 
-/// Fortran `MAX(a, b)` for reals. See [`min`].
+/// Fortran `MAX(a, b)` for reals. See [`min`]: the second argument wins on a tie.
 #[inline]
 pub fn max(a: f32, b: f32) -> f32 {
-    a.max(b)
+    if a > b {
+        a
+    } else {
+        b
+    }
 }
 
 // Neither of these is commutative. `MAX(-0.0, 0.0)` is `+0.0` and `MAX(0.0, -0.0)` is `-0.0`,

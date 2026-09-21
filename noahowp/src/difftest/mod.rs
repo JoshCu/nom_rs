@@ -25,6 +25,7 @@
 //! on read rather than reinterpreted into garbage.
 
 pub mod manifest;
+pub mod bind;
 
 use manifest::{Field, Kind, Shape, MAGIC, PARAM_SWEEP, PER_RECORD, STATIC};
 use std::collections::HashMap;
