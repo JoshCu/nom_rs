@@ -27,7 +27,7 @@ cd "$(dirname "$0")"
 INTRINSICS=(exp log log10 sqrt sin cos tan asin acos atan tanh
             pow0 pow1 pow2 pow3 pow4 pow7 powm1 pown2 pown3 pown4 powr
             powr2 powr3 powr4 powrh powrq powrmq powrmh powr15 powr17 powr667 powr23
-            sign1 nint int mod24)
+            sign1 nint int mod24 min24 max24 min0 max0)
 COUNT="${COUNT:-20000}"
 OUT=out
 mkdir -p "$OUT"

@@ -127,6 +127,29 @@ fn candidates(name: &str, x: f32, n: i32) -> Vec<(&'static str, f32)> {
             ("rem", x % 24.0),
             ("rem_euclid", x.rem_euclid(24.0)),
         ],
+        // `f32::min` is IEEE minNum: it returns the non-NaN operand, and prefers -0.0. The
+        // alternatives are what a hand translation of Fortran's MIN would produce, and they
+        // differ from it on exactly the NaN and signed-zero inputs the sweep forces in.
+        "min24" => vec![
+            ("min", x.min(24.0)),
+            ("lt", if x < 24.0 { x } else { 24.0 }),
+            ("le", if x <= 24.0 { x } else { 24.0 }),
+        ],
+        "max24" => vec![
+            ("max", x.max(24.0)),
+            ("gt", if x > 24.0 { x } else { 24.0 }),
+            ("ge", if x >= 24.0 { x } else { 24.0 }),
+        ],
+        "min0" => vec![
+            ("min", x.min(0.0)),
+            ("lt", if x < 0.0 { x } else { 0.0 }),
+            ("le", if x <= 0.0 { x } else { 0.0 }),
+        ],
+        "max0" => vec![
+            ("max", x.max(0.0)),
+            ("gt", if x > 0.0 { x } else { 0.0 }),
+            ("ge", if x >= 0.0 { x } else { 0.0 }),
+        ],
         "pow0" => vec![
             ("one", 1.0),
             ("powi", x.powi(0)),

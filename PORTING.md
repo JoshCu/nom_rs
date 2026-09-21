@@ -95,8 +95,8 @@ only `parse_date`, `julian_date`, `calendar_date`, `date_to_unix`, `unix_to_date
 
 | Upstream | Rust | Status |
 |---|---|---|
-| `src/ForcingModule.f90` | `physics/forcing_main.rs` | todo |
-| `src/AtmProcessing.f90` | `physics/atm_processing.rs` | todo |
+| `src/ForcingModule.f90` | `noahowp/src/physics/forcing_main.rs` | done |
+| `src/AtmProcessing.f90` | `noahowp/src/physics/atm_processing.rs` | done |
 | `src/InterceptionModule.f90` | `physics/interception.rs` | todo |
 | `src/EnergyModule.f90` | `physics/energy_main.rs` | todo |
 | `src/EtFluxModule.f90` | `physics/et_flux.rs` | todo |
@@ -116,6 +116,20 @@ only `parse_date`, `julian_date`, `calendar_date`, `date_to_unix`, `unix_to_date
 | `src/SurfaceRunoffModule.f90` | `physics/surface_runoff.rs` | todo |
 | `src/SurfaceRunoffInfiltration.f90` | `physics/surface_runoff_infiltration.rs` | todo |
 | `src/SubsurfaceRunoffModule.f90` | `physics/subsurface_runoff.rs` | todo |
+
+`ForcingModule.f90` and `AtmProcessing.f90` are verified twice over: against the Bondville year
+(`tests/forcing_vs_fortran.rs`) and against a 574-case sweep of all seven `OPT_SNF` branches
+(`tests/atm_sweep_vs_fortran.rs`). Bondville runs one option, so the sweep is where six of the
+seven phase schemes, the wet-bulb calculation and the direct-irradiance clamp are exercised at
+all -- see `reference/README.md`.
+
+Two things in `ATM` are deliberately *not* pinned by a test, because the Fortran itself cannot
+observe them. The wet-bulb temperature under `OPT_SNF == 6` and the snow probability under
+`OPT_SNF == 7` feed nothing but a `>=` comparison whose result is 0 or 1, so a ULP-level
+difference in either is invisible unless the value lands exactly on the threshold. They are
+still ported through the measured spellings -- but a mutation to them survives both fixtures,
+and that is a property of the model rather than a gap in the fixtures.
+
 
 ### BMI
 
@@ -237,3 +251,21 @@ someone tidies it up.
    call. This was the only genuine no-go the spike ever turned up, and it was found by probing
    the exponents the physics actually uses rather than a representative sample.
    (`fortran/intrinsics.rs`)
+
+21. **`NGEN_FORCING_ACTIVE` decides which precipitation field is authoritative**, and the two
+   branches are mirror images: one copies `PRCP` into `PRCPNONC`, the other copies it back.
+   Both leave the pair equal, so the choice only shows when they disagree on entry -- which is
+   every timestep, since whichever field the driver did not write still holds the previous
+   timestep's value. Upstream settles it with a `#ifdef`; the port takes it as a parameter
+   ([`PrecipInput`]), because the shipping configuration (BMI writes `PRCPNONC`) and the one
+   the fixtures were recorded under (the ASCII reader writes `PRCP`) both have to work.
+   (`physics/atm_processing.rs`)
+
+22. **`ATM` divides by zero under `OPT_SNF == 4` with no frozen precipitation.**
+   `bdfall * (PRCPSNOW / PRCP_FROZEN)` is 0/0 and `bdfall` comes out NaN. Nothing guards it
+   upstream, the sweep fixture covers the case, and the port reproduces the NaN rather than
+   inventing a guard. (`physics/atm_processing.rs`)
+
+23. **The comments on `O2PP` and `CO2PP` are swapped upstream.** `O2PP` is commented "co2
+   concentration" and `CO2PP` "o2 concentration". The assignments are right; only the comments
+   are crossed. (`physics/atm_processing.rs`)

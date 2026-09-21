@@ -183,6 +183,24 @@ pub fn pow2_real(x: f32) -> f32 {
     x * x
 }
 
+/// Fortran `MIN(a, b)` for reals.
+///
+/// The obvious spelling, and measured rather than assumed: Fortran does not define `MIN` when
+/// an argument is NaN, and leaves the sign of the result unspecified when the arguments are
+/// `+0.0` and `-0.0`. gfortran agrees with IEEE `minNum` -- which is `f32::min` -- on both.
+/// `if a < b { a } else { b }` also agrees; `if a <= b { a } else { b }` does not, returning
+/// `+0.0` where gfortran returns `-0.0`.
+#[inline]
+pub fn min(a: f32, b: f32) -> f32 {
+    a.min(b)
+}
+
+/// Fortran `MAX(a, b)` for reals. See [`min`].
+#[inline]
+pub fn max(a: f32, b: f32) -> f32 {
+    a.max(b)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -454,6 +472,67 @@ mod tests {
         (0x35AB_2A43, 0x38F6_9F74),
     ];
 
+    /// `MIN(x, 24.0)`, NaN, both infinities and both zeros first.
+    const MIN24: Vectors = &[
+        (0x7FC0_0000, 0x41C0_0000),
+        (0x7F80_0000, 0x41C0_0000),
+        (0xFF80_0000, 0xFF80_0000),
+        (0x0000_0000, 0x0000_0000),
+        (0x8000_0000, 0x8000_0000),
+        (0x41C0_0000, 0x41C0_0000),
+        (0xC1C0_0000, 0xC1C0_0000),
+        (0xC2C8_0000, 0xC2C8_0000),
+        (0xC248_07AE, 0xC248_07AE),
+        (0xBBA3_D923, 0xBBA3_D923),
+        (0x4247_FD71, 0x41C0_0000),
+        (0x42C8_0000, 0x41C0_0000),
+    ];
+    /// `MAX(x, 24.0)`, NaN, both infinities and both zeros first.
+    const MAX24: Vectors = &[
+        (0x7FC0_0000, 0x41C0_0000),
+        (0x7F80_0000, 0x7F80_0000),
+        (0xFF80_0000, 0x41C0_0000),
+        (0x0000_0000, 0x41C0_0000),
+        (0x8000_0000, 0x41C0_0000),
+        (0x41C0_0000, 0x41C0_0000),
+        (0xC1C0_0000, 0x41C0_0000),
+        (0xC2C8_0000, 0x41C0_0000),
+        (0xC248_07AE, 0x41C0_0000),
+        (0xBBA3_D923, 0x41C0_0000),
+        (0x4247_FD71, 0x4247_FD71),
+        (0x42C8_0000, 0x42C8_0000),
+    ];
+    /// `MIN(x, 0.0)`, NaN, both infinities and both zeros first.
+    const MIN0: Vectors = &[
+        (0x7FC0_0000, 0x0000_0000),
+        (0x7F80_0000, 0x0000_0000),
+        (0xFF80_0000, 0xFF80_0000),
+        (0x0000_0000, 0x0000_0000),
+        (0x8000_0000, 0x0000_0000),
+        (0x41C0_0000, 0x0000_0000),
+        (0xC1C0_0000, 0xC1C0_0000),
+        (0xC2C8_0000, 0xC2C8_0000),
+        (0xC248_07AE, 0xC248_07AE),
+        (0xBBA3_D923, 0xBBA3_D923),
+        (0x4247_FD71, 0x0000_0000),
+        (0x42C8_0000, 0x0000_0000),
+    ];
+    /// `MAX(x, 0.0)`, NaN, both infinities and both zeros first.
+    const MAX0: Vectors = &[
+        (0x7FC0_0000, 0x0000_0000),
+        (0x7F80_0000, 0x7F80_0000),
+        (0xFF80_0000, 0x0000_0000),
+        (0x0000_0000, 0x0000_0000),
+        (0x8000_0000, 0x0000_0000),
+        (0x41C0_0000, 0x41C0_0000),
+        (0xC1C0_0000, 0x0000_0000),
+        (0xC2C8_0000, 0x0000_0000),
+        (0xC248_07AE, 0x0000_0000),
+        (0xBBA3_D923, 0x0000_0000),
+        (0x4247_FD71, 0x4247_FD71),
+        (0x42C8_0000, 0x42C8_0000),
+    ];
+
     /// The constant real exponents that appear in `src/`, spelled as the Fortran
     /// spells them. Separate from [`POWR`] because each is a candidate for a
     /// compiler rewrite, and only measurement says which ones actually get one.
@@ -653,6 +732,26 @@ mod tests {
     /// uses. `x ** 2.` is the only one gfortran rewrites, so it is the only one that is not a
     /// `powf` call -- and `x ** 3.` sitting next to it, which is *not* rewritten, is why this
     /// has to be a table of measurements rather than a rule about whole numbers.
+    /// `MIN`/`MAX` over NaN, both infinities and both zeros -- the inputs where Fortran
+    /// defers to the processor and a hand translation can diverge without anyone noticing.
+    #[test]
+    fn min_and_max_match_gfortran() {
+        check("min(x, 24.0)", MIN24, |x| min(x, 24.0));
+        check("max(x, 24.0)", MAX24, |x| max(x, 24.0));
+        check("min(x, 0.0)", MIN0, |x| min(x, 0.0));
+        check("max(x, 0.0)", MAX0, |x| max(x, 0.0));
+
+        // `<=` picks the wrong zero: gfortran's MIN(-0.0, 0.0) is -0.0.
+        assert!(
+            disagrees(MIN0, &|x: f32| if x <= 0.0 { x } else { 0.0 }),
+            "if a <= b vs MIN",
+        );
+        assert!(
+            disagrees(MAX0, &|x: f32| if x >= 0.0 { x } else { 0.0 }),
+            "if a >= b vs MAX",
+        );
+    }
+
     #[test]
     fn constant_real_powers_match_gfortran() {
         check("x ** 2.", POWR2, pow2_real);

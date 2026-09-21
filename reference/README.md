@@ -74,6 +74,40 @@ newdate: odate(12) idt(i4) ndate(12)
 declin:  nowdate(19) lat lon slope azimuth cosz cosz_horiz julian (7 x r4) yearlen(i4)
 ```
 
+## The ATM sweep
+
+`atmsweep` writes `atm_sweep.difftest`. Bondville runs `precip_phase_option = 1` for the whole
+year, so six of the seven precipitation-phase schemes in `AtmProcessing` are never entered --
+and neither is the wet-bulb calculation, the Jennings logistic regression, the weather-model
+phase path, or the direct-irradiance clamp in the shortwave split. The port could have every
+one of them wrong and the year-long recording would still agree.
+
+574 cases: each of the seven options over 34 hand-placed inputs and 48 pseudo-random ones. The
+hand-placed cases are the ones a random sweep will not find --
+
+- each Jordan (1991) temperature boundary and the rain-snow threshold hit **exactly**, and
+  again at the next representable value up, since `<=` and `<` differ only there;
+- eight points inside the Jordan ramp, the one band where `FPICE` is neither 0, 0.6 nor 1;
+- both cosines at and below zero, and a sunrise case where they disagree enough to push the
+  direct irradiance over the solar constant;
+- frozen precipitation of exactly zero under `OPT_SNF == 4`, where upstream divides 0 by 0 and
+  `bdfall` goes NaN. That is live code, so reproducing the NaN is part of the contract;
+- four wind speeds taken from the intrinsic spike's own report, where `UU ** 2.` and a `powf`
+  call disagree. Those two spellings differ on 0.04% of inputs, which a sweep this size would
+  otherwise reach about once by luck -- and a port that used `powf` there passed both this
+  sweep and the Bondville year until these four cases were added.
+
+Inputs are generated in the driver and never agreed with the Rust side: the port reads them
+back out of the recorded pre-state. The one thing both sides must agree on is which option a
+case ran under, and that travels in the record's `itime` slot as `opt_snf * 100000 + sample`.
+
+Records go through the same `dt_record` the instrumented `RunModule` uses, so this fixture
+parses with the same reader and picks up new fields when upstream adds them. The static block
+at the head of the file is the namelist's own option set, *not* the option any given case ran
+under -- the sweep rebuilds `options` and `parameters` per `OPT_SNF`, because `paramRead`
+resolves `rain_snow_thresh` from the option and poking `options%opt_snf` alone would leave the
+threshold wrong.
+
 ## Why it is built this way
 
 **No BMI, no ngen, no NetCDF.** `noah-owp-modular` has no CMake of its own; `libsurfacebmi.so`

@@ -34,6 +34,7 @@ pub mod namelist_read;
 pub mod options;
 pub mod parameters;
 pub mod parameters_read;
+pub mod physics;
 pub mod run;
 pub mod utilities;
 pub mod water;

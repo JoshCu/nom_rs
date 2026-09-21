@@ -38,6 +38,11 @@ RANGES = {
     "nint": (-250.0, 250.0, "quarter"),
     "int": (-1000.0, 1000.0, "linear"),
     "mod24": (-100.0, 100.0, "linear"),
+    # MIN/MAX: the interesting inputs are not in the sweep but in EXTRA below.
+    "min24": (-100.0, 100.0, "linear"),
+    "max24": (-100.0, 100.0, "linear"),
+    "min0": (-100.0, 100.0, "linear"),
+    "max0": (-100.0, 100.0, "linear"),
     # Bases for integer powers: fractions through to temperatures. 0 through 4 are the only
     # literal exponents that occur in the model; pown* are the same exponents supplied at
     # runtime, which is a different code path on both sides.
@@ -77,7 +82,18 @@ RANGES = {
 # Bit patterns that must appear whatever the sweep produces. gfortran's SIGN(1.0, -0.0) is
 # -1.0 -- it follows IEEE copysign rather than the standard's "|A| when B >= 0" reading -- and
 # a linear sweep never lands exactly on zero, so the case would go untested.
-EXTRA = {"sign1": ["00000000", "80000000"]}
+# A quiet NaN, both infinities and both zeros, forced into the MIN/MAX sweeps: Fortran does
+# not define MIN(NaN, y), the two compilers need not agree, and a linear sweep reaches none of
+# these. The comparison inputs also include 24.0 and 0.0 themselves, so the "both operands
+# equal" case -- where the sign of zero is decided -- is covered rather than assumed.
+_EDGE = ["7FC00000", "7F800000", "FF800000", "00000000", "80000000", "41C00000", "C1C00000"]
+EXTRA = {
+    "sign1": ["00000000", "80000000"],
+    "min24": _EDGE,
+    "max24": _EDGE,
+    "min0": _EDGE,
+    "max0": _EDGE,
+}
 
 
 SIGNED = {"pow0", "pow1", "pow2", "pow3", "pow4", "pow7", "powm1", "pown2", "pown3",

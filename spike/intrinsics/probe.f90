@@ -75,6 +75,18 @@ program probe
         cycle
       case ('mod24')
         y = mod(x, 24.0)
+      ! MIN and MAX. Ordinary values are not the question -- NaN and the sign of zero are,
+      ! and both reach these call sites: `MIN(120., 67.92 + 51.25*EXP(...))` sees a NaN the
+      ! moment a forcing is unset, and `MAX(0.0, FPICE)` decides whether -0.0 survives into
+      ! the water balance. Fortran leaves both cases to the processor, so they are measured.
+      case ('min24')
+        y = min(x, 24.0)
+      case ('max24')
+        y = max(x, 24.0)
+      case ('min0')
+        y = min(x, 0.0)
+      case ('max0')
+        y = max(x, 0.0)
       ! Literal integer exponents: gfortran expands these inline rather than calling powf, and
       ! the expansion order decides the last bit. 0 through 4 are the only literal exponents
       ! that appear anywhere in noah-owp-modular's src/.
