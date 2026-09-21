@@ -189,6 +189,72 @@ fn candidates(name: &str, x: f32, n: i32) -> Vec<(&'static str, f32)> {
             ("powi", x.powi(7)),
             ("powf", x.powf(7.0)),
         ],
+        // Real *literal* exponents, as the model spells them. gfortran does not necessarily
+        // call powf for these: a whole or half number exponent gets rewritten into
+        // multiplications and square roots, which is a different computation. Each case
+        // offers powf alongside the rewrite a compiler would apply, so the report says which
+        // one gfortran actually chose rather than assuming.
+        "powr2" => vec![
+            ("powf", x.powf(2.0)),
+            ("mul", x * x),
+            ("powi", x.powi(2)),
+        ],
+        "powr3" => vec![
+            ("powf", x.powf(3.0)),
+            ("mul", x * x * x),
+            ("powi", x.powi(3)),
+        ],
+        "powr4" => vec![
+            ("powf", x.powf(4.0)),
+            ("sq_sq", {
+                let x2 = x * x;
+                x2 * x2
+            }),
+            ("powi", x.powi(4)),
+        ],
+        // `x ** 0.5` is the one exponent where LLVM rewrites `powf` on its own: at -O it turns
+        // `x.powf(0.5)` into a square root, which is not what gfortran's powf returns. Hiding
+        // the exponent behind `black_box` makes it opaque to that transform, so the call
+        // survives optimisation -- the `_opaque` candidate exists to prove it does.
+        "powrh" => vec![
+            ("powf", x.powf(0.5)),
+            ("sqrt", x.sqrt()),
+            ("powf_opaque", x.powf(std::hint::black_box(0.5))),
+            ("libm_opaque", unsafe { powf(x, std::hint::black_box(0.5)) }),
+        ],
+        "powrq" => vec![
+            ("powf", x.powf(0.25)),
+            ("sqrt2", x.sqrt().sqrt()),
+        ],
+        "powrmq" => vec![
+            ("powf", x.powf(-0.25)),
+            ("recip", 1.0 / x.sqrt().sqrt()),
+            ("rsqrt2", (1.0f32 / x).sqrt().sqrt()),
+        ],
+        "powrmh" => vec![
+            ("powf", x.powf(-1.0 / 2.0)),
+            ("recip", 1.0 / x.sqrt()),
+            ("rsqrt", (1.0f32 / x).sqrt()),
+        ],
+        "powr15" => vec![
+            ("powf", x.powf(1.5)),
+            ("x_sqrt", x * x.sqrt()),
+            ("sqrt_cube", (x * x * x).sqrt()),
+        ],
+        "powr17" => vec![
+            ("powf", x.powf(1.7)),
+            ("libm", unsafe { powf(x, 1.7) }),
+        ],
+        "powr667" => vec![
+            ("powf", x.powf(0.667)),
+            ("libm", unsafe { powf(x, 0.667) }),
+        ],
+        // The Fortran writes the exponent as `(2./3.)`; both compilers fold it to the same
+        // f32, so the Rust side may write the division out the same way.
+        "powr23" => vec![
+            ("powf", x.powf(2.0 / 3.0)),
+            ("libm", unsafe { powf(x, 2.0 / 3.0) }),
+        ],
         "powr" => vec![
             ("std", x.powf(REAL_EXP)),
             ("libm", unsafe { powf(x, REAL_EXP) }),

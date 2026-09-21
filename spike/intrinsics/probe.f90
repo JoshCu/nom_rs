@@ -99,9 +99,35 @@ program probe
       ! different code path from the literal cases -- a libcall, not an inline expansion.
       case ('pown2', 'pown3', 'pown4')
         y = x ** n
-      ! Real exponent: a genuine powf call.
+      ! Real exponent, not a whole or half number: a genuine powf call.
       case ('powr')
         y = x ** 0.6666667
+      ! Real *literal* exponents, spelled exactly as the model spells them. These are the
+      ! dangerous ones: gfortran rewrites `x ** 2.` into a multiply and `x ** 0.5` into a
+      ! square root rather than calling powf, so the Rust spelling that matches is not
+      ! necessarily powf. Every constant exponent that appears in src/ is here.
+      case ('powr2')
+        y = x ** 2.
+      case ('powr3')
+        y = x ** 3.
+      case ('powr4')
+        y = x ** 4.
+      case ('powrh')
+        y = x ** 0.5
+      case ('powrq')
+        y = x ** 0.25
+      case ('powrmq')
+        y = x ** (-0.25)
+      case ('powrmh')
+        y = x ** (-1.0/2)
+      case ('powr15')
+        y = x ** 1.5
+      case ('powr17')
+        y = x ** 1.7
+      case ('powr667')
+        y = x ** 0.667
+      case ('powr23')
+        y = x ** (2./3.)
       case default
         write(0, '(A)') 'unknown function: ' // trim(fname)
         stop 1

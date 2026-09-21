@@ -68,6 +68,18 @@ comparison would measure the optimiser rather than the libm.
 | `powm1` (`x ** (-1)`) | `recip` (`1.0 / x`), `powi`, `powf` |
 | `pown2` `pown3` `pown4` (runtime exponent) | `powi`, `powf`, `loop` (multiply n times) |
 | `powr` (`x ** 0.6666667`) | `std`, `libm`, `f64`, `exp_log` (`exp(y·log x)`) |
+| `powr2` `powr3` `powr4` (`x ** 2.` etc.) | `powf`, `powi`, and the multiply a compiler would fold to |
+| `powrh` (`x ** 0.5`) | `powf`, `sqrt`, `powf_opaque`, `libm_opaque` |
+| `powrq` `powrmq` (`x ** 0.25`, `** (-0.25)`) | `powf`, `sqrt(sqrt x)`, and its reciprocal |
+| `powrmh` (`x ** (-1.0/2)`) | `powf`, `1/sqrt x`, `sqrt(1/x)` |
+| `powr15` (`x ** 1.5`) | `powf`, `x·sqrt x`, `sqrt(x³)` |
+| `powr17` `powr667` `powr23` | `powf`, `libm` |
+
+The `powr*` rows are the constant **real** exponents, each spelled exactly as the Fortran
+spells it. They are separate cases because a decimal point changes the computation: `x ** 3` is
+expanded inline and `x ** 3.` is a `powf` call, and the two disagree on 26% of inputs. There is
+no rule covering them -- gfortran rewrites `x ** 2.` into a multiply but leaves `x ** 3.` and
+`x ** 4.` as calls -- so each of the eleven constant exponents in `src/` is measured on its own.
 
 0 through 4 are the only literal integer exponents anywhere in `noah-owp-modular/src/`; `**7`
 is kept only because it is where the candidates diverge most, which makes it the sharpest test
@@ -79,8 +91,9 @@ negative bases; the rest stay inside their domain so neither probe produces a Na
 ## Verdict
 
 **GO.** Run 2026-09-18 against GNU Fortran 15.2.0 (Ubuntu 15.2.0-16ubuntu1), rustc 1.98.1, at
-20k and 200k inputs per intrinsic: every intrinsic the model uses has a bit-identical Rust
-candidate at both optimisation levels. Strict bit-identity is achievable, and the plan's
+20k and 200k inputs per intrinsic, and re-run 2026-09-21 with the constant real exponents
+added: every intrinsic the model uses has a bit-identical Rust candidate at both optimisation
+levels. Strict bit-identity is achievable, and the plan's
 section 6.4 fallback is not needed.
 
 The winners are recorded in `noahowp/src/fortran/intrinsics.rs`, whose tests carry gfortran's
@@ -94,7 +107,8 @@ The set probed is every intrinsic that appears in `noah-owp-modular/src/`, not a
 | `exp` `log` `sin` `cos` | `f32`'s own method | widening to f64: 1 ULP on 0.07% (`exp`) to 1.4% (`sin`) of inputs |
 | `log10` `sqrt` `tan` `asin` `acos` `atan` `tanh` | `f32`'s own method | nothing -- all candidates agree |
 | `x ** <integer>` | **`powi`, always** | `x*x*x*x` is 2 ULP out on 34% of inputs for `**4`; `powf` 1 ULP out on 26% for `**3` |
-| `x ** <real>` | `powf` | `exp(y * log x)`: up to 12 ULP |
+| `x ** <real>` | `powf`, exponent behind `black_box` | `exp(y * log x)`: up to 12 ULP. `powi` for `x ** 3.` / `x ** 4.`: 1-2 ULP on 26-50% |
+| `x ** 2.` | `x * x` | `powf`: 1 ULP on 0.04%, and only in a debug build |
 | `SIGN(a, b)` | `copysign` | `if b >= 0.0` is wrong for `b = -0.0` |
 | `MOD(a, p)` | `%` | `rem_euclid` (Fortran's `MODULO`) differs on every negative argument |
 | `NINT(x)` | `round() as i32` | `round_ties_even` differs on every exact `.5` |
@@ -119,6 +133,22 @@ matched across the board, so the rule is uniform and needs no per-exponent judge
 **`powf` for an integer exponent is the trap that hides at `-O`.** It appears bit-identical for
 `**2` and `**(-1)` in an optimised build and is not; LLVM folded the call into a multiply. The
 runner now checks both levels and reports any candidate that only wins at one.
+
+**A decimal point in the exponent changes the computation, and the pattern does not
+generalise.** `x ** 3` and `x ** 3.` disagree on 26% of inputs: gfortran expands the integer
+form inline and calls `powf` for the real one. The tempting inference -- that a whole-number
+real exponent is just the integer power -- is false in both directions. gfortran *does* rewrite
+`x ** 2.` into a multiply, so `powf` is wrong there; it *does not* rewrite `x ** 3.` or
+`x ** 4.`, so the multiply is wrong there. All twenty-two constant-real-exponent sites in
+`src/` are now probed as written, which is the only way to know which regime each falls in.
+
+**`x ** 0.5` was the one genuine no-go, and `black_box` is the fix.** At `-O`, LLVM rewrites
+`x.powf(0.5)` into a square root; gfortran's `powf` returns something else on 0.04% of inputs,
+and a plain `sqrt` does not match either. So *no* spelling of `x ** 0.5` was bit-identical at
+both optimisation levels until the exponent was made opaque, which keeps the call a call.
+`fortran::intrinsics::powf` passes every exponent through `black_box` for this reason -- one
+rule, rather than a list of exponents needing special handling. Every other real exponent
+agrees with or without the barrier, so it costs nothing but a blocked constant-propagation.
 
 **Constant folding is a trap for tests, not for the port.** Both compilers evaluate a
 compile-time-constant argument in higher precision than the libm they would otherwise call, so

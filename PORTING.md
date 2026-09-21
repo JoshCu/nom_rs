@@ -222,3 +222,18 @@ someone tidies it up.
    expands `x ** n` by squaring, so `x * x * x * x` is a different computation from `x ** 4`
    and disagrees on 34% of inputs. `powf` is also not a substitute, and looks correct in
    release builds only because LLVM folds it into a multiply. (`fortran/intrinsics.rs`)
+
+19. **A decimal point in an exponent changes the computation.** `x ** 3` is expanded inline by
+   gfortran; `x ** 3.` is a `powf` call, and the two disagree on 26% of inputs. Twenty-two
+   sites in `src/` use a constant real exponent and each was probed as spelled, because the
+   pattern does not generalise: gfortran rewrites `x ** 2.` into a multiply (so `powf` is wrong
+   there) but leaves `x ** 3.` and `x ** 4.` as calls (so the multiply is wrong there). Copy
+   the exponent from the Fortran exactly, decimal point included.
+   (`fortran/intrinsics.rs`, `pow2_real`)
+
+20. **`x ** 0.5` is not a square root.** LLVM rewrites `x.powf(0.5)` into `sqrt` at `-O`, and
+   gfortran's `powf` disagrees with `sqrt` on 0.04% of inputs -- so that rewrite makes release
+   and debug builds differ. `powf` passes its exponent through `black_box` to keep the call a
+   call. This was the only genuine no-go the spike ever turned up, and it was found by probing
+   the exponents the physics actually uses rather than a representative sample.
+   (`fortran/intrinsics.rs`)

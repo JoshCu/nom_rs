@@ -53,6 +53,21 @@ RANGES = {
     "pow7": (0.1, 10.0, "log"),
     # Base for a real exponent, e.g. soil-moisture retention curves.
     "powr": (1e-6, 1e6, "log"),
+    # Real *literal* exponents as the model spells them. The whole-number ones take negative
+    # bases -- `forcing%UU ** 2.` is a wind component -- and are legal there because Fortran
+    # and IEEE pow both accept a negative base under an integral exponent. The fractional ones
+    # would return NaN on a negative base, so they stay positive.
+    "powr2": (1e-3, 1e3, "log"),
+    "powr3": (1e-3, 1e3, "log"),
+    "powr4": (1e-3, 1e3, "log"),
+    "powrh": (1e-6, 1e6, "log"),
+    "powrq": (1e-6, 1e6, "log"),
+    "powrmq": (1e-6, 1e6, "log"),
+    "powrmh": (1e-6, 1e6, "log"),
+    "powr15": (1e-6, 1e6, "log"),
+    "powr17": (1e-6, 1e6, "log"),
+    "powr667": (1e-6, 1e6, "log"),
+    "powr23": (1e-6, 1e6, "log"),
 }
 
 
@@ -65,7 +80,8 @@ RANGES = {
 EXTRA = {"sign1": ["00000000", "80000000"]}
 
 
-SIGNED = {"pow0", "pow1", "pow2", "pow3", "pow4", "pow7", "powm1", "pown2", "pown3", "pown4"}
+SIGNED = {"pow0", "pow1", "pow2", "pow3", "pow4", "pow7", "powm1", "pown2", "pown3",
+          "pown4", "powr2", "powr3", "powr4"}
 
 
 def values(lo, hi, spacing, n):
