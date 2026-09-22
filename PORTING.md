@@ -71,7 +71,7 @@ Legend: **done** -- ported and tested · **stub** -- surface exists, body outsta
 | `src/EnergyType.f90` | `noahowp/src/energy.rs` | done |
 | `src/WaterType.f90` | `noahowp/src/water.rs` | done |
 | `src/UtilitiesModule.f90` | `noahowp/src/utilities.rs` | done (the shapes `UtilitiesMain` calls) |
-| `src/RunModule.f90` | `noahowp/src/run.rs` | partial -- `initialize_from_file`; the timestep loop awaits the physics |
+| `src/RunModule.f90` | `noahowp/src/run.rs` | partial -- `initialize_from_file`; the timestep loop is next, now that all five physics calls are ported |
 
 `UtilitiesModule.f90`'s `geth_newdate` and `geth_idts` handle punctuated and unpunctuated
 dates at six resolutions with fractional seconds. `UtilitiesMain` calls each exactly one way --
@@ -98,24 +98,24 @@ only `parse_date`, `julian_date`, `calendar_date`, `date_to_unix`, `unix_to_date
 | `src/ForcingModule.f90` | `noahowp/src/physics/forcing_main.rs` | done |
 | `src/AtmProcessing.f90` | `noahowp/src/physics/atm_processing.rs` | done |
 | `src/InterceptionModule.f90` | `noahowp/src/physics/interception.rs` | done |
-| `src/EnergyModule.f90` | `physics/energy_main.rs` | todo |
-| `src/EtFluxModule.f90` | `physics/et_flux.rs` | todo |
-| `src/AlbedoModule.f90` | `physics/albedo.rs` | todo |
-| `src/ShortwaveRadiationModule.f90` | `physics/shortwave_radiation.rs` | todo |
-| `src/ThermalPropertiesModule.f90` | `physics/thermal_properties.rs` | todo |
-| `src/SnowSoilTempModule.f90` | `physics/snow_soil_temp.rs` | todo |
-| `src/PrecipHeatModule.f90` | `physics/precip_heat.rs` | todo |
-| `src/WaterModule.f90` | `physics/water_main.rs` | todo |
-| `src/CanopyWaterModule.f90` | `physics/canopy_water.rs` | todo |
-| `src/SnowWaterModule.f90` | `physics/snow_water.rs` | todo |
-| `src/SnowWaterRenew.f90` | `physics/snow_water_renew.rs` | todo |
-| `src/SnowLayerChange.f90` | `physics/snow_layer_change.rs` | todo |
-| `src/SoilWaterModule.f90` | `physics/soil_water.rs` | todo |
-| `src/SoilWaterMovement.f90` | `physics/soil_water_movement.rs` | todo |
-| `src/SoilWaterRetentionCoeff.f90` | `physics/soil_water_retention_coeff.rs` | todo |
-| `src/SurfaceRunoffModule.f90` | `physics/surface_runoff.rs` | todo |
-| `src/SurfaceRunoffInfiltration.f90` | `physics/surface_runoff_infiltration.rs` | todo |
-| `src/SubsurfaceRunoffModule.f90` | `physics/subsurface_runoff.rs` | todo |
+| `src/EnergyModule.f90` | `physics/energy_main.rs` | done |
+| `src/EtFluxModule.f90` | `physics/et_flux.rs` | done |
+| `src/AlbedoModule.f90` | `physics/albedo.rs` | done |
+| `src/ShortwaveRadiationModule.f90` | `physics/shortwave_radiation.rs` | done |
+| `src/ThermalPropertiesModule.f90` | `physics/thermal_properties.rs` | done |
+| `src/SnowSoilTempModule.f90` | `physics/snow_soil_temp.rs` | done |
+| `src/PrecipHeatModule.f90` | `physics/precip_heat.rs` | done |
+| `src/WaterModule.f90` | `physics/water_main.rs` | done |
+| `src/CanopyWaterModule.f90` | `physics/canopy_water.rs` | done |
+| `src/SnowWaterModule.f90` | `physics/snow_water.rs` | done |
+| `src/SnowWaterRenew.f90` | `physics/snow_water_renew.rs` | done |
+| `src/SnowLayerChange.f90` | `physics/snow_layer_change.rs` | done |
+| `src/SoilWaterModule.f90` | `physics/soil_water.rs` | done |
+| `src/SoilWaterMovement.f90` | `physics/soil_water_movement.rs` | done |
+| `src/SoilWaterRetentionCoeff.f90` | `physics/soil_water_retention_coeff.rs` | done |
+| `src/SurfaceRunoffModule.f90` | `physics/surface_runoff.rs` | done |
+| `src/SurfaceRunoffInfiltration.f90` | `physics/surface_runoff_infiltration.rs` | done |
+| `src/SubsurfaceRunoffModule.f90` | `physics/subsurface_runoff.rs` | done |
 
 `ForcingModule.f90` and `AtmProcessing.f90` are verified twice over: against the Bondville year
 (`tests/forcing_vs_fortran.rs`) and against a 574-case sweep of all seven `OPT_SNF` branches
@@ -143,6 +143,34 @@ from `FVEG < 0.05` only when FVEG is *exactly* 0.05, which under `dveg` 1/6/7 wo
 `1 - exp(-0.52 * (LAI + SAI))` to round to exactly 0.05 -- and LAI and SAI have both already
 been floored at 0.05 by then, so their sum cannot get low enough. The comparison is copied
 verbatim; there is nothing to test it with.
+
+`EnergyModule.f90` and its tree are verified against the Bondville year only
+(`tests/energy_vs_fortran.rs`), with the complete recorded pre-state loaded and the complete
+post-state compared. There is no energy sweep yet, so every energy option Bondville does not
+select -- including the `OPT_BTR == 4` and `OPT_RSF == 5` bodies -- is ported but unverified.
+
+`WaterModule.f90` and its ten-module tree are verified against the Bondville year
+(`tests/water_vs_fortran.rs`) and against a sweep of ~1,300 cases (`tests/water_sweep_vs_fortran.rs`):
+the Bondville year replayed under 56 option configurations, in its own climate and a colder,
+wetter one that builds a layered pack, plus hand-pushed cases for the glacier cap, lakes, layer
+merging and splitting, and the dynamic VIC paths where more water arrives than the soil can take
+in. Both tests load the complete pre-state and compare the complete post-state. Bondville on its
+own reaches one runoff scheme and never starts `WaterMain` with more than one snow layer, so
+`DIVIDE`, `COMBO` and seven of the eight runoff schemes are sweep-only; see `reference/README.md`.
+
+Two groups of `DYNAMIC_VIC` branches are unreachable, and documented rather than tested: the
+`IITERATION30` / `IITERATION3` pairs on both sides of `DP + I_0 > I_MAX`. Each needs
+`TEMPR1 + FMAX*DT > DP` under `FMAX*DT < DP`, where `TEMPR1 = RR1(I_0, I_MAX, YD)` with `YD`
+unassigned -- and `RR1` of a zero depth is exactly `+0.0`. They are reachable only through
+whatever the uninitialised `YD` holds; see behaviour 26 below.
+
+Three things the water fixtures are known not to pin, found by mutating the port and watching
+the tests pass: `DIVIDE`'s `DZ(1) > 0.05` differs from `>=` or `> 0.0501` only for a layer
+landing in that sliver, and `COMPACT` moves the thickness before `DIVIDE` sees it, so no
+hand-set value reliably lands there; `INFIL`'s `CVFRZ * FRZX / DICE` is reached in 8 cases,
+none of which round differently from `CVFRZ * (FRZX / DICE)`; and the bottom-layer `MLIQ`
+floor under `OPT_DRN == 5` needs less than 0.01 mm of liquid water in the bottom layer, which
+nothing reaches. Each is copied as written.
 
 ### BMI
 
@@ -295,3 +323,34 @@ someone tidies it up.
    for `parameters%X =` rather than listed, so an eighth added upstream is picked up rather
    than silently recorded once and checked never.
    (`reference/gen_serializer.py`, `physics/interception.rs`)
+
+26. **`DYNAMIC_VIC` reads `YD` before assigning it.** On both branches where
+   `FMAX*DT < DP`, `CALL RR1(parameters, I_0, I_MAX, YD, TEMPR1)` runs with `YD` never set.
+   `YD` is passed by reference, so gfortran keeps it in a stack slot and the call sees whatever
+   that slot held -- behaviour the source does not define. The port supplies `0.0`
+   (`YD_UNASSIGNED`). The water sweep enters the two branches 144 and 18 times, and the
+   reference build agrees with the port for any value from `0.0` to `1e-3`, while `0.5` or
+   `-1.0` produce 839 field disagreements across the sweep. So what the slot holds behaves like
+   a small depth in this build, but that is a measurement, not a guarantee. A different
+   compiler, flag or call sequence could change it, and the fixtures would show it.
+   (`physics/surface_runoff_infiltration.rs`)
+
+27. **`SoilWaterMovement.f90` carries its own copy of `ROSR12`**, character for character the
+   one in `SnowSoilTempModule.f90`. The port calls the one copy, `snow_soil_temp::rosr12`. If
+   upstream edits one and not the other, the two need splitting again.
+   (`physics/soil_water_movement.rs`)
+
+28. **`WaterMain` keeps a soil water budget nobody reads.** `tw0`, `smcold`, `acsrf`, `acsub`,
+   `acpcp`, `dtheta_max`, `totalwat` and `errwat` are locals -- several implicitly `SAVE`d by
+   their initialisers -- computed and never returned. They are not reproduced. Neither is
+   `SOILWATER`'s `SH2OMIN`, and `DYNAMIC_VIC`'s final `TOP_MOIST` / `I_0` updates are dropped
+   for the same reason. (`physics/water_main.rs`, `physics/soil_water.rs`)
+
+29. **`WaterMain` sets `ETRANI` for `1..=NROOT` only.** Layers below the root zone keep
+   whatever they held, and `SRT` reads every layer. (`physics/water_main.rs`)
+
+30. **`drainage_option = 1` is the groundwater scheme without the groundwater model.**
+   `ZWT` is never updated, nothing floors the soil water, and a year at Bondville drives
+   `SH2O` to NaN within weeks. The option passes the namelist bounds check. The port
+   reproduces the arithmetic and the sweep records up to the point the state leaves range.
+   (`physics/subsurface_runoff.rs`, `reference/watersweep_driver.f90`)

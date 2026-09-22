@@ -139,6 +139,56 @@ the canopy heights of whichever vegetation type the case selected.
 The configuration travels in the record id as
 `((dveg * 32 + vegtyp) * 2 + croptype) * 100 + sample`.
 
+## The water sweep
+
+`watersweep` writes `water_sweep.difftest`. Bondville runs one option of each water scheme for
+the whole year -- `runoff_option = 8`, `drainage_option = 8`, `frozen_soil_option = 1`,
+`dynamic_vic_option = 1`, `subsurface_option = 1` -- which leaves seven of the eight surface
+runoff schemes, both TOPMODEL water tables, MMF drainage, the second diffusivity form and
+one-way coupling unentered. Its winter is thin too: over 200 sampled timesteps `WaterMain` never
+starts with more than one snow layer, so `DIVIDE` and `COMBO` are never reached at all.
+
+Unlike the other sweeps, most cases here are not synthetic. Snow layers, soil moisture and the
+water table are state that builds up over weeks, and a hand-drawn pre-state is a poor stand-in
+for one the model grew itself. So the driver **replays the Bondville year** under 56
+configurations, making the five physics calls itself in `solve_noahowp`'s order so that only
+`WaterMain` is recorded:
+
+- every runoff scheme with the drainage scheme of the same number, under both diffusivity forms;
+- the other two dynamic VIC infiltration equations;
+- one-way coupling (`subsurface_option = 2`);
+- six cross pairings where one scheme reads what the other writes -- `ZWT` from `ZWTEQ`,
+  `FCRMAX`, the MMF water table;
+
+each in the recorded climate and in a colder, wetter one (`SFCTMP - 8 K`, `PRCP x 2`) where the
+pack builds up in layers and melts out again. A replay records against per-category budgets
+(layered snow, shallow snow, rain, frozen ground, anything) so a long snow season does not
+spend them all in December.
+
+Then three sets of hand-pushed cases, each derived from a state a replay reached and restored
+afterwards so the replay continues on its own trajectory:
+
+1. **Snow and surface** -- the 5000 mm glacier cap, a lake point over and under its storage
+   cap, frozen ground, sublimation large enough for `COMBINE` to drop a layer, a top layer
+   starved of ice and one thinner than `DZMIN`, a pack thin enough to fold back into shallow
+   snow, and a single thick layer for `DIVIDE` to split into two and on into three.
+2. **Infiltration capacity** -- a near-saturated top layer under heavy ponding, so that more
+   water arrives in a sub-step than `DYNAMIC_VIC` can take in (`FMAX*DT < DP`). The two
+   branches that follow are the ones where upstream reads `YD` before assigning it; see
+   `PORTING.md`. Run under all three infiltration equations.
+3. **A deep MMF water table**, where `SSTEP` accumulates recharge instead of updating `SMCWTD`.
+
+Some legal option pairings drive the column out of physical range -- `drainage_option = 1` is
+the groundwater scheme with the groundwater model absent, and `SH2O` goes NaN within weeks --
+and `EnergyMain` then `STOP`s on negative emitted longwave. The driver ends such a replay when
+its state leaves range, and keeps what it had recorded: those pairs are still valid.
+
+The configuration travels in the record id as
+`((((run * 10 + drn) * 10 + inf) * 10 + infdv) * 10 + sub) * 10 + climate) * 100 + sample`,
+with climate 9 marking the hand-pushed cases. The forcing year is read once up front:
+`read_forcing_text` keeps its file position in saved locals that only reset at end of file, so
+it cannot be restarted for a second replay.
+
 ## Why it is built this way
 
 **No BMI, no ngen, no NetCDF.** `noah-owp-modular` has no CMake of its own; `libsurfacebmi.so`
