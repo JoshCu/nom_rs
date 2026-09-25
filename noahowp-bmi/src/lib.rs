@@ -2,17 +2,15 @@
 //!
 //! Scope is what `bmi-driver` actually calls -- see `docs/RUST_REWRITE_PLAN.md` section 1.1.
 //! `get_value_ptr`, `*_at_indices` and the extended grid functions are deliberately absent.
-//!
-//! Physics is not ported yet: [`BmiNoahOwp::update`] returns [`BmiError::NotImplemented`].
-//! Everything that does not need the physics column -- metadata, grids, time, the variable
-//! registry, and `initialize` reading a config -- is complete and tested.
+//! [`c_abi`] exposes this as a C BMI through `register_bmi`.
 
+pub mod c_abi;
 pub mod vars;
 
-use noahowp::domain::Domain;
-use noahowp::levels::Levels;
-use noahowp::options::Options;
-use noahowp::{ConfigError, NamelistConfig};
+use noahowp::parameters_read::Tables;
+use noahowp::physics::atm_processing::PrecipInput;
+use noahowp::run::{NoahOwp, StepError};
+use noahowp::{ConfigError, NamelistConfig, Shifted};
 use std::path::Path;
 
 pub use vars::{VarInfo, VarType, COMPONENT_NAME, INPUT_ITEMS, OUTPUT_ITEMS, VARS};
@@ -21,16 +19,19 @@ pub use vars::{VarInfo, VarType, COMPONENT_NAME, INPUT_ITEMS, OUTPUT_ITEMS, VARS
 pub enum BmiError {
     Config(ConfigError),
     Date(noahowp::date_time_utils::DateError),
+    /// A timestep failed where upstream would `stop`.
+    Step(StepError),
     /// The model has not been initialized.
     NotInitialized,
     /// No such exchange item.
     UnknownVar(String),
+    /// The name exists, but not for this operation -- e.g. `set_value` on an output only
+    /// `get_value` accepts, or the wrong numeric type.
+    Unsupported { op: &'static str, name: String },
     /// No such grid id.
     UnknownGrid(i32),
     /// `update_until` was given a time before the current one.
     TimeInThePast { requested: f64, current: f64 },
-    /// Reached only for the parts of the port that are still outstanding.
-    NotImplemented(&'static str),
 }
 
 impl std::fmt::Display for BmiError {
@@ -38,13 +39,14 @@ impl std::fmt::Display for BmiError {
         match self {
             BmiError::Config(e) => write!(f, "{e}"),
             BmiError::Date(e) => write!(f, "{e}"),
+            BmiError::Step(e) => write!(f, "{e}"),
             BmiError::NotInitialized => write!(f, "model is not initialized"),
             BmiError::UnknownVar(n) => write!(f, "unknown variable {n:?}"),
+            BmiError::Unsupported { op, name } => write!(f, "{op} does not accept {name:?}"),
             BmiError::UnknownGrid(g) => write!(f, "unknown grid {g}"),
             BmiError::TimeInThePast { requested, current } => {
                 write!(f, "update_until({requested}) is before the current time {current}")
             }
-            BmiError::NotImplemented(what) => write!(f, "{what} is not ported yet"),
         }
     }
 }
@@ -63,46 +65,66 @@ impl From<noahowp::date_time_utils::DateError> for BmiError {
     }
 }
 
+impl From<StepError> for BmiError {
+    fn from(e: StepError) -> Self {
+        BmiError::Step(e)
+    }
+}
+
 pub type BmiResult<T> = Result<T, BmiError>;
 
-/// The model state a `bmi_noahowp` instance wraps.
+/// `bmi_noahowp`.
 ///
 /// Holds no globals, so instances are independent and `Send` -- which is what lets a driver run
 /// many catchments as threads rather than as processes. See the plan, section 4.
-#[derive(Debug)]
-struct Model {
-    // namelist and options are read by the physics column, which is not ported yet.
-    #[allow(dead_code)]
-    namelist: NamelistConfig,
-    levels: Levels,
-    domain: Domain,
-    #[allow(dead_code)]
-    options: Options,
-}
-
-/// `bmi_noahowp`.
 #[derive(Debug, Default)]
 pub struct BmiNoahOwp {
-    model: Option<Model>,
+    model: Option<Box<NoahOwp>>,
 }
 
 fn assert_send<T: Send>() {}
+
+/// `dest = [x]` for a scalar.
+fn put(dest: &mut [f32], x: f32) {
+    if let Some(d) = dest.first_mut() {
+        *d = x;
+    }
+}
+
+/// `dest = [array]`.
+fn put_all(dest: &mut [f32], src: &Shifted<f32>) {
+    for (d, s) in dest.iter_mut().zip(src.iter()) {
+        *d = *s;
+    }
+}
+
+/// `array(:) = src(:)`.
+fn take_all(dst: &mut Shifted<f32>, src: &[f32]) {
+    for (d, s) in dst.iter_mut().zip(src) {
+        *d = *s;
+    }
+}
 
 impl BmiNoahOwp {
     pub fn new() -> Self {
         Self::default()
     }
 
-    fn model(&self) -> BmiResult<&Model> {
-        self.model.as_ref().ok_or(BmiError::NotInitialized)
+    fn model(&self) -> BmiResult<&NoahOwp> {
+        self.model.as_deref().ok_or(BmiError::NotInitialized)
     }
 
-    fn model_mut(&mut self) -> BmiResult<&mut Model> {
-        self.model.as_mut().ok_or(BmiError::NotInitialized)
+    fn model_mut(&mut self) -> BmiResult<&mut NoahOwp> {
+        self.model.as_deref_mut().ok_or(BmiError::NotInitialized)
     }
 
     pub fn is_initialized(&self) -> bool {
         self.model.is_some()
+    }
+
+    /// The wrapped model, for callers that want the state directly.
+    pub fn noahowp(&self) -> Option<&NoahOwp> {
+        self.model.as_deref()
     }
 
     // ------------------------------------------------------------------ lifecycle
@@ -110,41 +132,18 @@ impl BmiNoahOwp {
     /// `noahowp_initialize` -> `initialize_from_file`.
     pub fn initialize(&mut self, config_file: &str) -> BmiResult<()> {
         let namelist = NamelistConfig::read(Path::new(config_file))?;
-
-        let levels = Levels::new(&namelist);
-        let options = Options::new(&namelist);
-        let mut domain = Domain::new(&namelist)?;
-
-        // RunModule: the model starts at nowdate = startdate, itime = 1, t = 0.
-        domain.nowdate = domain.startdate.clone();
-        domain.itime = 1;
-        domain.time_dbl = 0.0;
-
-        // domain%zsnso(-nsnow+1:0) = 0.0; domain%zsnso(1:nsoil) = namelist%zsoil
-        for iz in (-namelist.nsnow + 1)..=0 {
-            domain.zsnso[iz] = 0.0;
-        }
-        for iz in 1..=namelist.nsoil {
-            domain.zsnso[iz] = namelist.zsoil[iz];
-        }
-
-        // The simulation timeline, from which ntime (and so end_time) follows.
-        let sim_datetimes = noahowp::date_time_utils::get_utime_list(
-            domain.start_datetime,
-            domain.end_datetime,
-            domain.dt,
-        )?;
-        domain.ntime = sim_datetimes.len() as i32;
-        domain.sim_datetimes = sim_datetimes;
-
-        self.model = Some(Model { namelist, levels, domain, options });
+        let tables = Tables::read(&namelist)?;
+        self.model = Some(Box::new(NoahOwp::new(namelist, &tables)?));
         Ok(())
     }
 
     /// `noahowp_update` -> `advance_in_time`.
+    ///
+    /// The shipping library is built with `NGEN_FORCING_ACTIVE`, so precipitation arrives as
+    /// `PRCPNONC` through `set_value`.
     pub fn update(&mut self) -> BmiResult<()> {
-        let _ = self.model_mut()?;
-        Err(BmiError::NotImplemented("solve_noahowp (the physics column)"))
+        self.model_mut()?.advance_in_time(PrecipInput::NonConvective)?;
+        Ok(())
     }
 
     /// `noahowp_update_until`.
@@ -273,25 +272,160 @@ impl BmiNoahOwp {
 
     // ------------------------------------------------------------------ values
 
-    /// `noahowp_get_float` / `_int`. Awaits the state types.
-    pub fn get_value_f32(&self, name: &str, _dest: &mut [f32]) -> BmiResult<()> {
+    /// `noahowp_get_float`.
+    ///
+    /// Three names are not a plain copy: `ECAN` and `ETRAN` are rates scaled to a depth per
+    /// timestep, and `QSEVA` is m/s scaled to mm/s. The factors and operation order are the
+    /// Fortran's -- see `set_value_f32` for why that matters.
+    pub fn get_value_f32(&self, name: &str, dest: &mut [f32]) -> BmiResult<()> {
         self.var(name)?;
-        Err(BmiError::NotImplemented("get_value"))
+        let m = self.model()?;
+        let (f, w, e, d, p) = (&m.forcing, &m.water, &m.energy, &m.domain, &m.parameters);
+        let m2mm: f32 = 1000.; // unit conversion m to mm
+        match name {
+            "ACSNOM" => put(dest, w.ACSNOM),
+            "AXAJ" => put(dest, p.AXAJ),
+            "BEXP" => put_all(dest, &p.bexp),
+            "BXAJ" => put(dest, p.BXAJ),
+            "CMC" => put(dest, w.CMC),
+            "CWP" => put(dest, p.CWP),
+            "DKSAT" => put_all(dest, &p.dksat),
+            "ECAN" => put(dest, w.ECAN * d.dt),
+            "ETRAN" => put(dest, w.ETRAN * d.dt),
+            "EVAPOTRANS" => put(dest, w.EVAPOTRANS),
+            "FIRA" => put(dest, e.FIRA),
+            "FRZX" => put(dest, p.frzx),
+            "FSA" => put(dest, e.FSA),
+            "FSH" => put(dest, e.FSH),
+            "FSNO" => put(dest, w.FSNO),
+            "GH" => put(dest, e.GH),
+            "HVT" => put(dest, p.HVT),
+            "KDT" => put(dest, p.kdt),
+            "LH" => put(dest, e.LH),
+            "LWDN" => put(dest, f.LWDN),
+            "MFSNO" => put(dest, p.MFSNO),
+            "MP" => put(dest, p.MP),
+            "PRCPNONC" => put(dest, f.PRCPNONC),
+            "Q2" => put(dest, f.Q2),
+            "QINSUR" => put(dest, w.qinsur),
+            "QRAIN" => put(dest, w.QRAIN),
+            "QSEVA" => put(dest, w.qseva * m2mm),
+            "QSNOW" => put(dest, w.QSNOW),
+            "REFKDT" => put(dest, p.refkdt),
+            "RSURF_EXP" => put(dest, p.RSURF_EXP),
+            "RSURF_SNOW" => put(dest, p.RSURF_SNOW),
+            "SCAMAX" => put(dest, p.SCAMAX),
+            "SFCPRS" => put(dest, f.SFCPRS),
+            "SFCTMP" => put(dest, f.SFCTMP),
+            "SLOPE" => put(dest, p.slope),
+            "SMCMAX" => put_all(dest, &p.smcmax),
+            "SNEQV" => put(dest, w.SNEQV),
+            "SNLIQ" => put_all(dest, &w.SNLIQ),
+            "SNOWH" => put(dest, w.SNOWH),
+            "SNOWT_AVG" => put(dest, e.SNOWT_AVG),
+            "SOLDN" => put(dest, f.SOLDN),
+            "TG" => put(dest, e.TG),
+            "TGS" => put(dest, e.TGS),
+            "TRAD" => put(dest, e.TRAD),
+            "UU" => put(dest, f.UU),
+            "VCMX25" => put(dest, p.VCMX25),
+            "VV" => put(dest, f.VV),
+            "XXAJ" => put(dest, p.XXAJ),
+            _ => {
+                // ISNOW: an integer, so not reachable through get_float upstream either.
+                dest.fill(-1.0);
+                return Err(BmiError::Unsupported { op: "get_value (real)", name: name.into() });
+            }
+        }
+        Ok(())
     }
 
-    pub fn get_value_i32(&self, name: &str, _dest: &mut [i32]) -> BmiResult<()> {
+    /// `noahowp_get_int` -- only `ISNOW`.
+    pub fn get_value_i32(&self, name: &str, dest: &mut [i32]) -> BmiResult<()> {
         self.var(name)?;
-        Err(BmiError::NotImplemented("get_value"))
+        let m = self.model()?;
+        match name {
+            "ISNOW" => dest.fill(m.water.ISNOW),
+            _ => {
+                dest.fill(-1);
+                return Err(BmiError::Unsupported { op: "get_value (integer)", name: name.into() });
+            }
+        }
+        Ok(())
     }
 
-    pub fn set_value_f32(&mut self, name: &str, _src: &[f32]) -> BmiResult<()> {
+    /// `noahowp_set_float`.
+    ///
+    /// Not symmetric with `get_value_f32`: fewer names are settable, and the unit conversions
+    /// are written as the Fortran writes them -- `QSEVA` comes in as `src * 0.001`, which in
+    /// binary32 is not `src / 1000`.
+    ///
+    /// Three names recompute a secondary parameter inline, exactly as upstream does:
+    /// `DKSAT` and `REFKDT` recompute `kdt`, `SMCMAX` recomputes `frzx`. The rest do not --
+    /// in particular setting `KDT` or `FRZX` directly is overwritten by a later `DKSAT`,
+    /// `REFKDT` or `SMCMAX`, and setting `REFDK` is not possible at all.
+    pub fn set_value_f32(&mut self, name: &str, src: &[f32]) -> BmiResult<()> {
         self.var(name)?;
-        Err(BmiError::NotImplemented("set_value"))
+        let m = self.model_mut()?;
+        let (f, w, e, d, p) =
+            (&mut m.forcing, &mut m.water, &mut m.energy, &m.domain, &mut m.parameters);
+        let mm2m: f32 = 0.001; // unit conversion mm to m
+        let Some(&s) = src.first() else {
+            return Err(BmiError::Unsupported { op: "set_value (empty)", name: name.into() });
+        };
+        match name {
+            "AXAJ" => p.AXAJ = s,
+            "BEXP" => take_all(&mut p.bexp, src),
+            "BXAJ" => p.BXAJ = s,
+            "CWP" => p.CWP = s,
+            "DKSAT" => {
+                take_all(&mut p.dksat, src);
+                p.kdt = p.refkdt * p.dksat[1] / p.refdk;
+            }
+            "ETRAN" => w.ETRAN = s / d.dt,
+            "EVAPOTRANS" => w.EVAPOTRANS = s,
+            "FRZX" => p.frzx = s,
+            "HVT" => p.HVT = s,
+            "KDT" => p.kdt = s,
+            "LWDN" => f.LWDN = s,
+            "MFSNO" => p.MFSNO = s,
+            "MP" => p.MP = s,
+            "PRCPNONC" => f.PRCPNONC = s,
+            "Q2" => f.Q2 = s,
+            "QINSUR" => w.qinsur = s,
+            "QSEVA" => w.qseva = s * mm2m,
+            "REFKDT" => {
+                p.refkdt = s;
+                p.kdt = p.refkdt * p.dksat[1] / p.refdk;
+            }
+            "RSURF_EXP" => p.RSURF_EXP = s,
+            "RSURF_SNOW" => p.RSURF_SNOW = s,
+            "SCAMAX" => p.SCAMAX = s,
+            "SFCPRS" => f.SFCPRS = s,
+            "SFCTMP" => f.SFCTMP = s,
+            "SLOPE" => p.slope = s,
+            "SMCMAX" => {
+                take_all(&mut p.smcmax, src);
+                p.frzx = 0.15 * (p.smcmax[1] / p.smcref[1]) * (0.412 / 0.468);
+            }
+            "SNEQV" => w.SNEQV = s,
+            "SOLDN" => f.SOLDN = s,
+            "TG" => e.TG = s,
+            "TGS" => e.TGS = s,
+            "UU" => f.UU = s,
+            "VCMX25" => p.VCMX25 = s,
+            "VV" => f.VV = s,
+            "XXAJ" => p.XXAJ = s,
+            _ => return Err(BmiError::Unsupported { op: "set_value (real)", name: name.into() }),
+        }
+        Ok(())
     }
 
+    /// `noahowp_set_int` -- accepts nothing upstream.
     pub fn set_value_i32(&mut self, name: &str, _src: &[i32]) -> BmiResult<()> {
         self.var(name)?;
-        Err(BmiError::NotImplemented("set_value"))
+        self.model()?;
+        Err(BmiError::Unsupported { op: "set_value (integer)", name: name.into() })
     }
 }
 
@@ -310,8 +444,15 @@ mod tests {
 
     const NAMELIST: &str = include_str!("../tests/namelist.input");
 
+    /// The Bondville namelist, pointed at the verbatim upstream tables the model crate tests
+    /// against.
+    fn namelist() -> String {
+        let tables = concat!(env!("CARGO_MANIFEST_DIR"), "/../noahowp/tests/fixtures/");
+        NAMELIST.replace("\"../parameters/\"", &format!("\"{tables}\""))
+    }
+
     fn initialized() -> (BmiNoahOwp, tempdir::TempPath) {
-        let path = tempdir::write_temp(NAMELIST);
+        let path = tempdir::write_temp(&namelist());
         let mut b = BmiNoahOwp::new();
         b.initialize(path.as_str()).unwrap();
         (b, path)
@@ -457,10 +598,95 @@ mod tests {
         }
     }
 
+    /// Bondville-ish forcing, so a step has something physical to work with.
+    fn force(b: &mut BmiNoahOwp) {
+        for (name, v) in [
+            ("SFCPRS", 101_325.0),
+            ("SFCTMP", 285.0),
+            ("SOLDN", 400.0),
+            ("LWDN", 300.0),
+            ("UU", 2.0),
+            ("VV", 1.0),
+            ("Q2", 0.006),
+            ("PRCPNONC", 0.0005),
+        ] {
+            b.set_value_f32(name, &[v]).unwrap();
+        }
+    }
+
     #[test]
-    fn update_is_not_ported_yet() {
+    fn update_advances_time_and_produces_output() {
         let (mut b, _p) = initialized();
-        assert!(matches!(b.update(), Err(BmiError::NotImplemented(_))));
+        force(&mut b);
+        b.update().unwrap();
+        assert_eq!(b.get_current_time().unwrap(), 1800.0);
+        b.update_until(1800.0 * 5.0).unwrap();
+        assert_eq!(b.get_current_time().unwrap(), 1800.0 * 5.0);
+
+        for name in OUTPUT_ITEMS.iter().filter(|n| **n != "ISNOW") {
+            let n = (b.get_var_nbytes(name).unwrap() / 4) as usize;
+            let mut buf = vec![f32::NAN; n];
+            b.get_value_f32(name, &mut buf).unwrap();
+            assert!(buf.iter().all(|x| x.is_finite()), "{name} = {buf:?}");
+        }
+        // It rained on a warm column: water reached the surface.
+        let mut q = [0.0f32];
+        b.get_value_f32("QINSUR", &mut q).unwrap();
+        assert!(q[0] > 0.0, "QINSUR = {}", q[0]);
+        let mut isnow = [99];
+        b.get_value_i32("ISNOW", &mut isnow).unwrap();
+        assert_eq!(isnow, [0]);
+    }
+
+    #[test]
+    fn set_then_get_round_trips_forcings() {
+        let (mut b, _p) = initialized();
+        force(&mut b);
+        let mut buf = [0.0f32];
+        b.get_value_f32("SFCTMP", &mut buf).unwrap();
+        assert_eq!(buf, [285.0]);
+    }
+
+    #[test]
+    fn qseva_is_scaled_both_ways_as_upstream_writes_it() {
+        // In by `* 0.001`, out by `* 1000.` -- not the same as dividing.
+        let (mut b, _p) = initialized();
+        b.set_value_f32("QSEVA", &[3.0]).unwrap();
+        assert_eq!(b.noahowp().unwrap().water.qseva, 3.0f32 * 0.001);
+        let mut buf = [0.0f32];
+        b.get_value_f32("QSEVA", &mut buf).unwrap();
+        assert_eq!(buf, [3.0f32 * 0.001 * 1000.0]);
+    }
+
+    #[test]
+    fn refkdt_and_dksat_recompute_kdt_and_smcmax_recomputes_frzx() {
+        let (mut b, _p) = initialized();
+        b.set_value_f32("REFKDT", &[2.0]).unwrap();
+        let p = &b.noahowp().unwrap().parameters;
+        assert_eq!(p.kdt, 2.0 * p.dksat[1] / p.refdk);
+
+        b.set_value_f32("DKSAT", &[1e-5, 2e-5, 3e-5, 4e-5]).unwrap();
+        let p = &b.noahowp().unwrap().parameters;
+        assert_eq!(p.dksat.as_slice(), &[1e-5, 2e-5, 3e-5, 4e-5]);
+        assert_eq!(p.kdt, 2.0 * 1e-5f32 / p.refdk);
+
+        b.set_value_f32("SMCMAX", &[0.4; 4]).unwrap();
+        let p = &b.noahowp().unwrap().parameters;
+        assert_eq!(p.frzx, 0.15 * (0.4 / p.smcref[1]) * (0.412 / 0.468));
+
+        // KDT itself is settable, and does not recompute anything.
+        b.set_value_f32("KDT", &[7.0]).unwrap();
+        assert_eq!(b.noahowp().unwrap().parameters.kdt, 7.0);
+    }
+
+    #[test]
+    fn etran_and_ecan_are_depths_per_timestep() {
+        let (mut b, _p) = initialized();
+        b.set_value_f32("ETRAN", &[1.0]).unwrap();
+        assert_eq!(b.noahowp().unwrap().water.ETRAN, 1.0 / 1800.0);
+        let mut buf = [0.0f32];
+        b.get_value_f32("ETRAN", &mut buf).unwrap();
+        assert_eq!(buf, [(1.0f32 / 1800.0) * 1800.0]);
     }
 
     #[test]
@@ -474,28 +700,30 @@ mod tests {
 
     #[test]
     fn update_until_to_the_current_time_is_a_no_op() {
-        // Zero steps, so it must not reach the unported physics.
         let (mut b, _p) = initialized();
         assert!(b.update_until(0.0).is_ok());
+        assert_eq!(b.get_current_time().unwrap(), 0.0);
     }
 
     #[test]
-    fn value_access_awaits_the_state_types() {
+    fn value_access_rejects_what_upstream_rejects() {
         let (mut b, _p) = initialized();
         let mut buf = [0.0f32; 1];
-        assert!(matches!(
-            b.get_value_f32("SFCTMP", &mut buf),
-            Err(BmiError::NotImplemented(_))
-        ));
-        // ...but an unknown name still fails as an unknown name.
-        assert!(matches!(
-            b.get_value_f32("NOPE", &mut buf),
-            Err(BmiError::UnknownVar(_))
-        ));
-        assert!(matches!(
-            b.set_value_f32("SFCTMP", &[1.0]),
-            Err(BmiError::NotImplemented(_))
-        ));
+        assert!(matches!(b.get_value_f32("NOPE", &mut buf), Err(BmiError::UnknownVar(_))));
+        // Outputs are readable but not writable...
+        assert!(matches!(b.set_value_f32("FSH", &[1.0]), Err(BmiError::Unsupported { .. })));
+        // ...ISNOW is an integer, and no integer is settable.
+        assert!(matches!(b.get_value_f32("ISNOW", &mut buf), Err(BmiError::Unsupported { .. })));
+        assert!(matches!(b.set_value_i32("ISNOW", &[1]), Err(BmiError::Unsupported { .. })));
+    }
+
+    #[test]
+    fn value_access_needs_initialization() {
+        let mut b = BmiNoahOwp::new();
+        let mut buf = [0.0f32; 1];
+        assert!(matches!(b.get_value_f32("SFCTMP", &mut buf), Err(BmiError::NotInitialized)));
+        assert!(matches!(b.set_value_f32("SFCTMP", &[1.0]), Err(BmiError::NotInitialized)));
+        assert!(matches!(b.update(), Err(BmiError::NotInitialized)));
     }
 
     #[test]

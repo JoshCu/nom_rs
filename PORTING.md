@@ -71,7 +71,7 @@ Legend: **done** -- ported and tested · **stub** -- surface exists, body outsta
 | `src/EnergyType.f90` | `noahowp/src/energy.rs` | done |
 | `src/WaterType.f90` | `noahowp/src/water.rs` | done |
 | `src/UtilitiesModule.f90` | `noahowp/src/utilities.rs` | done (the shapes `UtilitiesMain` calls) |
-| `src/RunModule.f90` | `noahowp/src/run.rs` | partial -- `initialize_from_file`; the timestep loop is next, now that all five physics calls are ported |
+| `src/RunModule.f90` | `noahowp/src/run.rs` | done -- `initialize_from_file`, `advance_in_time`, `solve_noahowp` (`tests/timestep_loop_vs_fortran.rs`) |
 
 `UtilitiesModule.f90`'s `geth_newdate` and `geth_idts` handle punctuated and unpunctuated
 dates at six resolutions with fractional seconds. `UtilitiesMain` calls each exactly one way --

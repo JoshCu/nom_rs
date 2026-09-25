@@ -1,17 +1,17 @@
-//! Port of `src/RunModule.f90` @ 0ff055e -- initialisation.
+//! Port of `src/RunModule.f90` @ 0ff055e.
 //!
 //! `initialize_from_file` builds the model and then overwrites a long list of state that the
 //! `*Type` modules had just set to `huge(1.0)`. That second pass is not decoration: it is where
 //! the run actually starts from, and a field it misses keeps the `huge` sentinel.
 //!
-//! The timestep loop (`advance_in_time` / `solve_noahowp`) lands with the physics; see
-//! `PORTING.md`. Two pieces of `initialize_from_file` are deliberately absent, both of them
-//! behind `#ifndef` guards that the BMI path compiles out: `open_forcing_file`, because forcing
-//! arrives through `set_value`, and `initialize_output`, the only NetCDF user in the codebase.
+//! Four pieces of the module are deliberately absent, all of them behind `#ifndef` guards that
+//! the BMI path compiles out: `open_forcing_file` and `read_forcing_text`, because forcing
+//! arrives through `set_value`, and `initialize_output` / `add_to_output`, the only NetCDF
+//! users in the codebase.
 
 #![allow(non_snake_case)]
 
-use crate::date_time_utils::{get_utime_list, DateError};
+use crate::date_time_utils::{get_utime_list, unix_to_date, DateError};
 use crate::domain::Domain;
 use crate::energy::Energy;
 use crate::forcing::Forcing;
@@ -20,7 +20,43 @@ use crate::namelist_read::{ConfigError, NamelistConfig};
 use crate::options::Options;
 use crate::parameters::Parameters;
 use crate::parameters_read::Tables;
+use crate::physics::atm_processing::PrecipInput;
+use crate::physics::energy_main::{energy_main, EmittedLongwaveNotPositive};
+use crate::physics::forcing_main::forcing_main;
+use crate::physics::interception::interception_main;
+use crate::physics::water_main::water_main;
+use crate::utilities::utilities_main;
 use crate::water::Water;
+
+/// Why a timestep could not be taken. Upstream `stop`s on both.
+#[derive(Debug)]
+pub enum StepError {
+    Date(DateError),
+    Energy(EmittedLongwaveNotPositive),
+}
+
+impl std::fmt::Display for StepError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            StepError::Date(e) => write!(f, "{e}"),
+            StepError::Energy(e) => write!(f, "{e}"),
+        }
+    }
+}
+
+impl std::error::Error for StepError {}
+
+impl From<DateError> for StepError {
+    fn from(e: DateError) -> Self {
+        StepError::Date(e)
+    }
+}
+
+impl From<EmittedLongwaveNotPositive> for StepError {
+    fn from(e: EmittedLongwaveNotPositive) -> Self {
+        StepError::Energy(e)
+    }
+}
 
 /// `noahowp_type` -- one model column.
 ///
@@ -61,6 +97,85 @@ impl NoahOwp {
         };
         this.initialize_state()?;
         Ok(this)
+    }
+
+    /// `advance_in_time`.
+    ///
+    /// `precip_input` says which precipitation forcing the driver wrote: the BMI path sets
+    /// `PRCPNONC` ([`PrecipInput::NonConvective`]), the reference build's ASCII reader `PRCP`.
+    pub fn advance_in_time(&mut self, precip_input: PrecipInput) -> Result<(), StepError> {
+        self.solve_noahowp(precip_input)?;
+
+        self.domain.itime += 1; // increment the integer time by 1
+        // `dble(time_dbl + dt)`: real*8 + real promotes dt, so the sum is already f64.
+        self.domain.time_dbl += self.domain.dt as f64; // increment model time in seconds by DT
+        Ok(())
+    }
+
+    /// `solve_noahowp` -- one timestep: the five physics calls, in order.
+    pub fn solve_noahowp(&mut self, precip_input: PrecipInput) -> Result<(), StepError> {
+        let domain = &mut self.domain;
+
+        // Compute the current UNIX datetime -- end-of-timestep datetimes.
+        //
+        // Upstream indexes `sim_datetimes(itime)` unchecked, which reads past the end of the
+        // list once a driver steps beyond `end_time` (bmi-driver's `allow_exceed_end_time`).
+        // The value only feeds `unix_to_date`, whose results are unused, so past the end
+        // `curr_datetime` is extrapolated by dt rather than read out of bounds.
+        let i = (domain.itime - 1) as usize;
+        domain.curr_datetime = match domain.sim_datetimes.get(i) {
+            Some(&t) => t,
+            None => match domain.sim_datetimes.last() {
+                Some(&last) => {
+                    let beyond = (i + 1 - domain.sim_datetimes.len()) as f64;
+                    last + beyond * domain.dt as f64
+                }
+                None => domain.curr_datetime,
+            },
+        };
+        let _ = unix_to_date(domain.curr_datetime);
+
+        utilities_main(domain.itime, domain, &mut self.forcing, &mut self.energy)?;
+
+        forcing_main(
+            &self.options,
+            &self.parameters,
+            &mut self.forcing,
+            &mut self.energy,
+            &mut self.water,
+            precip_input,
+        );
+
+        interception_main(
+            &self.domain,
+            &self.options,
+            &mut self.parameters,
+            &self.forcing,
+            &mut self.energy,
+            &mut self.water,
+        );
+
+        energy_main(
+            &mut self.domain,
+            &self.levels,
+            &self.options,
+            &mut self.parameters,
+            &self.forcing,
+            &mut self.energy,
+            &mut self.water,
+        )?;
+
+        water_main(
+            &mut self.domain,
+            &self.levels,
+            &self.options,
+            &self.parameters,
+            &self.forcing,
+            &mut self.energy,
+            &mut self.water,
+        );
+
+        Ok(())
     }
 
     /// The assignments `initialize_from_file` makes after the types are built.

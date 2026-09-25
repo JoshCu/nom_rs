@@ -49,12 +49,15 @@ Both input readers are tested against **verbatim copies** of the upstream `MPTAB
 hand-written approximations. `noahowp/tests/real_inputs.rs` is the file to look at first if you
 want to see what is actually proven.
 
-### Stubs -- surface exists, body outstanding
+### BMI: complete (2026-09-25)
 
-- `BmiNoahOwp::update` -> `BmiError::NotImplemented` (the physics column)
-- `get_value_*` / `set_value_*` -> `NotImplemented`, but they **do** still reject unknown
-  variable names as unknown, so the metadata contract is honest
-- `c_abi.rs` (`register_bmi`, the C ABI) -- not started
+- `BmiNoahOwp::update` runs `advance_in_time`; `get_value` / `set_value` are ported from
+  `noahowp_get_float` / `_int` / `noahowp_set_float`, unit factors and inline `kdt` / `frzx`
+  recomputation included.
+- `noahowp-bmi/src/c_abi.rs` exports `register_bmi`, filling a CSDMS `bmi.h` function table, so
+  `bmi-driver` (and ngen) load it through the **`bmi_c`** adapter with no middleware.
+- Over a year of 53 catchments of gage-10154200 (SLOTH + NoahOWP + CFE), `bmi-driver` gives the
+  same `Q_OUT` as the Fortran `libsurfacebmi.so`, to every printed digit.
 
 ### Not started
 
