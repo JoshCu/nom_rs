@@ -1,6 +1,6 @@
 # Test fixtures
 
-Verbatim copies from `NOAA-OWP/noah-owp-modular` @ `0ff055e`:
+Verbatim copies from `NOAA-OWP/noah-owp-modular` @ `0242a96` (unchanged since `0ff055e`):
 
 | File | Upstream path |
 |---|---|

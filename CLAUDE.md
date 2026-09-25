@@ -3,7 +3,7 @@
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
 A Rust port of the BMI path of [Noah-OWP-Modular](https://github.com/NOAA-OWP/noah-owp-modular)
-(Fortran), pinned at upstream `0ff055e`. **The overriding goal is output that is bit-identical to
+(Fortran), pinned at upstream `0242a96`. **The overriding goal is output that is bit-identical to
 the Fortran.** Almost every rule below exists to protect that.
 
 ## Commands

@@ -1,4 +1,4 @@
-//! Port of `src/DomainType.f90` @ 0ff055e.
+//! Port of `src/DomainType.f90` @ 0242a96.
 
 use crate::date_time_utils::{date_to_unix, DateError};
 use crate::layers::Shifted;
@@ -17,8 +17,12 @@ pub struct Domain {
     pub startdate: String,
     /// end date of the model run (YYYYMMDDHHmm)
     pub enddate: String,
-    /// current date of the model run (YYYYMMDDHHmm)
-    pub nowdate: String,
+    /// integer components of startdate, parsed once at init
+    pub start_year: i32,
+    pub start_month: i32,
+    pub start_day: i32,
+    pub start_hour: i32,
+    pub start_minute: i32,
     /// unix start datetime (s since 1970-01-01)
     pub start_datetime: f64,
     /// unix end datetime
@@ -80,7 +84,11 @@ impl Domain {
             dt: f32::MAX,
             startdate: "EMPTYDATE999".to_string(),
             enddate: "EMPTYDATE999".to_string(),
-            nowdate: "EMPTYDATE999".to_string(),
+            start_year: i32::MAX,
+            start_month: i32::MAX,
+            start_day: i32::MAX,
+            start_hour: i32::MAX,
+            start_minute: i32::MAX,
             start_datetime: HUGE_INT_AS_REAL,
             end_datetime: HUGE_INT_AS_REAL,
             curr_datetime: HUGE_INT_AS_REAL,
@@ -123,8 +131,55 @@ impl Domain {
         self.ist = namelist.sfctyp;
         self.start_datetime = date_to_unix(&namelist.startdate)?;
         self.end_datetime = date_to_unix(&namelist.enddate)?;
+        [
+            self.start_year,
+            self.start_month,
+            self.start_day,
+            self.start_hour,
+            self.start_minute,
+        ] = read_date_components(&namelist.startdate)?;
         Ok(())
     }
+}
+
+/// `read(startdate, '(I4,4I2)')` from the `character(len=12)` startdate.
+///
+/// The string is blank-padded to 12 as the Fortran variable is, and blanks in a field are
+/// ignored (`BLANK='NULL'`), so an all-blank field reads as zero: `19980101` gives midnight.
+/// A field that is not an integer is an error, as it is a runtime error in the Fortran.
+///
+/// A month outside 1 to 12 is also rejected here. The Fortran goes on to index the month
+/// table with it unchecked; every other out-of-range component is well-defined arithmetic
+/// there (Feb 30 is Mar 2) and is accepted.
+fn read_date_components(date: &str) -> Result<[i32; 5], DateError> {
+    let padded = format!("{date:<12}");
+    let bytes = padded.as_bytes();
+    let fields = [
+        (0..4, "year"),
+        (4..6, "month"),
+        (6..8, "day"),
+        (8..10, "hour"),
+        (10..12, "minute"),
+    ];
+    let mut out = [0; 5];
+    for (slot, (range, what)) in out.iter_mut().zip(fields) {
+        let field: String = bytes
+            .get(range)
+            .ok_or(DateError::BadField(what))?
+            .iter()
+            .filter(|&&c| c != b' ')
+            .map(|&c| c as char)
+            .collect();
+        *slot = if field.is_empty() {
+            0
+        } else {
+            field.parse().map_err(|_| DateError::BadField(what))?
+        };
+    }
+    if !(1..=12).contains(&out[1]) {
+        return Err(DateError::BadField("month"));
+    }
+    Ok(out)
 }
 
 #[cfg(test)]
@@ -166,8 +221,21 @@ mod tests {
         assert_eq!(d.ist, 1); // from sfctyp
         assert_eq!(d.start_datetime, 883_636_200.0);
         assert_eq!(d.end_datetime, 915_172_200.0);
+        let start = [d.start_year, d.start_month, d.start_day, d.start_hour, d.start_minute];
+        assert_eq!(start, [1998, 1, 1, 6, 30]);
         // dzsnso comes across with its bounds intact.
         assert_eq!(d.dzsnso[1], 0.1);
         assert_eq!(d.zsoil[4].to_bits(), (-1.0f32 * 2.0f32).to_bits());
+    }
+
+    #[test]
+    fn reads_date_components_as_the_fortran_format_does() {
+        assert_eq!(read_date_components("199801010630").unwrap(), [1998, 1, 1, 6, 30]);
+        // blank padding to len=12, and blanks within a field, read as nothing
+        assert_eq!(read_date_components("19980101").unwrap(), [1998, 1, 1, 0, 0]);
+        assert_eq!(read_date_components("1998 1 1 6 0").unwrap(), [1998, 1, 1, 6, 0]);
+        assert!(read_date_components("1998ab010630").is_err());
+        assert!(read_date_components("199813010630").is_err());
+        assert!(read_date_components("199800010630").is_err());
     }
 }

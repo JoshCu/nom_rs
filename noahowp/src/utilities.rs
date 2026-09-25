@@ -1,74 +1,55 @@
-//! Port of `src/UtilitiesModule.f90` @ 0ff055e.
+//! Port of `src/UtilitiesModule.f90` @ 0242a96.
 //!
 //! The first of the five physics calls: advance the calendar to this timestep, then work out
 //! where the sun is. Nothing here is a column process, which is why upstream keeps it separate.
 //!
 //! # Scope
 //!
-//! `geth_newdate` and `geth_idts` are general date routines that between them handle punctuated
-//! and unpunctuated strings at six resolutions, with fractional seconds. The model calls each
-//! one way and one way only:
-//!
-//! - `geth_newdate(domain%startdate, idt)` with a 12-character `YYYYMMDDHHMM` date and `idt` in
-//!   minutes, producing another 12-character date;
-//! - `geth_idts(nowdate(1:10), year//"-01-01")` with two 10-character `YYYY-MM-DD` dates,
-//!   producing a whole number of days.
-//!
-//! Only those shapes are ported. Anything else is a [`DateError`] rather than a quietly wrong
-//! answer -- upstream reaches `call abort()` on most of them anyway. The rest of the general
-//! machinery has no caller and porting it would be untested code with no way to test it.
+//! Dates are carried as integer components (year, month, day, hour, minute), parsed once from
+//! `startdate` at init. Everything the model calls is ported. `minutes_between` is not: its
+//! only caller is the ASCII forcing reader, which the BMI path compiles out.
 
 #![allow(non_snake_case)]
 
-use crate::date_time_utils::DateError;
 use crate::domain::Domain;
 use crate::energy::Energy;
 use crate::forcing::Forcing;
 use crate::fortran::intrinsics as fi;
 
 /// `UtilitiesMain`.
-pub fn utilities_main(
-    itime: i32,
-    domain: &mut Domain,
-    forcing: &mut Forcing,
-    energy: &mut Energy,
-) -> Result<(), DateError> {
+pub fn utilities_main(itime: i32, domain: &Domain, forcing: &mut Forcing, energy: &mut Energy) {
     // `idt = itime * (domain%dt / 60)`. The division is real and the product is real; the
     // assignment to an integer then truncates toward zero. Computing `itime * dt as i32 / 60`
     // instead would round differently for any dt that is not a whole number of minutes.
     let idt = fi::int(itime as f32 * (domain.dt / 60.0));
 
-    // current 'nowdate' from start date + integer length of run to current time
-    domain.nowdate = geth_newdate(&domain.startdate, idt)?;
-
-    // calc_declin wants the punctuated form, which UtilitiesMain builds by hand from nowdate.
-    // Seconds are always "00": nowdate carries only minutes.
-    let n = &domain.nowdate;
-    if n.len() < 12 {
-        return Err(DateError::BadLength(n.len()));
-    }
-    let punctuated = format!(
-        "{}-{}-{}_{}:{}:00",
-        &n[0..4],
-        &n[4..6],
-        &n[6..8],
-        &n[8..10],
-        &n[10..12]
+    // calculate current date components from the start date components
+    // plus the integer length of run to current time
+    let now = advance_datetime(
+        domain.start_year,
+        domain.start_month,
+        domain.start_day,
+        domain.start_hour,
+        domain.start_minute,
+        idt,
     );
 
-    let declin = calc_declin(
-        &punctuated,
+    // calculate current declination of direct solar radiation input
+    let declin = calc_declin_components(
+        now.year,
+        day_of_year(now.year, now.month, now.day),
+        now.hour,
+        now.minute,
+        0,
         domain.lat,
         domain.lon,
         domain.terrain_slope,
         domain.azimuth,
-    )?;
+    );
     energy.COSZ = declin.cosz;
     energy.COSZ_HORIZ = declin.cosz_horiz;
     forcing.YEARLEN = declin.yearlen;
     forcing.JULIAN = declin.julian;
-
-    Ok(())
 }
 
 /// Days in February, `nfeb`.
@@ -92,182 +73,94 @@ pub fn nfeb(year: i32) -> i32 {
     n
 }
 
+// The routines below implement the same calendar nfeb() defines: the proleptic Gregorian
+// leap-year rules with the additional exception that years divisible by 3600 are NOT leap
+// years. Day numbers count from 0001-01-01 = day 0. Integer `/` truncates toward zero in both
+// languages, so the arithmetic carries over as written.
+
+/// A date/time as integer components.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DateTime {
+    pub year: i32,
+    pub month: i32,
+    pub day: i32,
+    pub hour: i32,
+    pub minute: i32,
+}
+
+/// `year_start_day`: day number of Jan 1 of the given year, from the count of leap years
+/// before it.
+pub fn year_start_day(yr: i32) -> i32 {
+    365 * (yr - 1) + (yr - 1) / 4 - (yr - 1) / 100 + (yr - 1) / 400 - (yr - 1) / 3600
+}
+
+/// `days_from_civil`: day number of a civil date (valid for years >= 1).
+pub fn days_from_civil(yr: i32, mo: i32, dy: i32) -> i32 {
+    year_start_day(yr) + day_of_year(yr, mo, dy)
+}
+
 const MDAY: [i32; 12] = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
 
-fn digits(s: &str, range: std::ops::Range<usize>, what: &'static str) -> Result<i32, DateError> {
-    s.get(range)
-        .ok_or(DateError::BadField(what))?
-        .trim()
-        .parse()
-        .map_err(|_| DateError::BadField(what))
+/// `civil_from_days`: the inverse of [`days_from_civil`], as `(yr, mo, dy)`.
+pub fn civil_from_days(days: i32) -> (i32, i32, i32) {
+    // estimate the year from the mean Gregorian year length, then step to
+    // the year whose [start, start + length) interval contains the day.
+    // `int()` of a real*8 truncates toward zero, as `as i32` does.
+    let mut yr = ((days as f64 + 0.5) / 365.2425) as i32 + 1;
+    while year_start_day(yr + 1) <= days {
+        yr += 1;
+    }
+    while year_start_day(yr) > days {
+        yr -= 1;
+    }
+
+    let mut doy = days - year_start_day(yr);
+    let mut mo = 1;
+    loop {
+        let mut mlen = MDAY[mo as usize - 1];
+        if mo == 2 {
+            mlen = nfeb(yr);
+        }
+        if doy < mlen {
+            break;
+        }
+        doy -= mlen;
+        mo += 1;
+    }
+    (yr, mo, doy + 1)
 }
 
-/// `geth_newdate` for a 12-character `YYYYMMDDHHMM` date and `idt` in minutes.
+/// `advance_datetime`: advance a date/time by a signed number of minutes.
+pub fn advance_datetime(yr: i32, mo: i32, dy: i32, hr: i32, mi: i32, dminutes: i32) -> DateTime {
+    let total = hr * 60 + mi + dminutes;
+    // `modulo` takes the sign of the divisor, which is `rem_euclid` for a positive divisor.
+    let minute_of_day = total.rem_euclid(1440);
+    let dday = (total - minute_of_day) / 1440;
+    let (year, month, day) = civil_from_days(days_from_civil(yr, mo, dy) + dday);
+    DateTime {
+        year,
+        month,
+        day,
+        hour: minute_of_day / 60,
+        minute: minute_of_day % 60,
+    }
+}
+
+/// `day_of_year`: days since Jan 1 of the same year (Jan 1 -> 0).
 ///
-/// See the module docs for why the other shapes are absent.
-pub fn geth_newdate(odate: &str, idt: i32) -> Result<String, DateError> {
-    if odate.len() != 12 || odate.as_bytes()[4] == b'-' {
-        return Err(DateError::BadLength(odate.len()));
+/// `mo` must be 1 to 12. The Fortran indexes `cum(mo)` unchecked; [`Domain::init_transfer`]
+/// rejects a start month outside that range, and every month computed from it is in range.
+pub fn day_of_year(yr: i32, mo: i32, dy: i32) -> i32 {
+    const CUM: [i32; 12] = [0, 31, 59, 90, 120, 151, 181, 212, 243, 273, 304, 334];
+
+    let mut d = CUM[mo as usize - 1] + dy - 1;
+    if mo > 2 {
+        d += nfeb(yr) - 28;
     }
-
-    let yrold = digits(odate, 0..4, "year")?;
-    let moold = digits(odate, 4..6, "month")?;
-    let dyold = digits(odate, 6..8, "day")?;
-    let hrold = digits(odate, 8..10, "hour")?;
-    let miold = digits(odate, 10..12, "minute")?;
-
-    let mut mday = MDAY;
-    mday[1] = nfeb(yrold);
-
-    // The Fortran prints each failed check and then calls abort().
-    if !(1..=12).contains(&moold) {
-        return Err(DateError::BadField("month"));
-    }
-    if dyold < 1 || dyold > mday[moold as usize - 1] {
-        return Err(DateError::BadField("day"));
-    }
-    if !(0..=23).contains(&hrold) {
-        return Err(DateError::BadField("hour"));
-    }
-    if !(0..=59).contains(&miold) {
-        return Err(DateError::BadField("minute"));
-    }
-
-    // idt is in minutes: the `idtmin` branch.
-    let mut nday = idt.abs() / 1440;
-    let mut nhour = idt.abs() % 1440 / 60;
-    let nmin = idt.abs() % 60;
-
-    let (mut yrnew, mut monew, mut dynew, hrnew, minew);
-    if idt >= 0 {
-        let mut m = miold + nmin;
-        if m >= 60 {
-            m -= 60;
-            nhour += 1;
-        }
-        minew = m;
-
-        let mut h = hrold + nhour;
-        if h >= 24 {
-            h -= 24;
-            nday += 1;
-        }
-        hrnew = h;
-
-        dynew = dyold;
-        monew = moold;
-        yrnew = yrold;
-        for _ in 0..nday {
-            dynew += 1;
-            if dynew > mday[monew as usize - 1] {
-                dynew -= mday[monew as usize - 1];
-                monew += 1;
-                if monew > 12 {
-                    monew = 1;
-                    yrnew += 1;
-                    mday[1] = nfeb(yrnew);
-                }
-            }
-        }
-    } else {
-        let mut m = miold - nmin;
-        if m < 0 {
-            m += 60;
-            nhour += 1;
-        }
-        minew = m;
-
-        let mut h = hrold - nhour;
-        if h < 0 {
-            h += 24;
-            nday += 1;
-        }
-        hrnew = h;
-
-        dynew = dyold;
-        monew = moold;
-        yrnew = yrold;
-        for _ in 0..nday {
-            dynew -= 1;
-            if dynew == 0 {
-                monew -= 1;
-                if monew == 0 {
-                    monew = 12;
-                    yrnew -= 1;
-                    mday[1] = nfeb(yrnew);
-                }
-                dynew = mday[monew as usize - 1];
-            }
-        }
-    }
-
-    // `format(i4,i2.2,i2.2,i2.2,i2.2)`. The year field is `i4`, not `i4.4`: a year below 1000
-    // would come out space-padded, which is upstream's behaviour and not worth diverging from.
-    Ok(format!("{yrnew:4}{monew:02}{dynew:02}{hrnew:02}{minew:02}"))
+    d
 }
 
-/// `geth_idts` for two 10-character `YYYY-MM-DD` dates, giving whole days.
-pub fn geth_idts(newdate: &str, olddate: &str) -> Result<i32, DateError> {
-    if newdate.len() != 10 || olddate.len() != 10 {
-        return Err(DateError::BadLength(newdate.len()));
-    }
-    if newdate.as_bytes()[4] != b'-' || olddate.as_bytes()[4] != b'-' {
-        return Err(DateError::BadField("separator"));
-    }
-
-    // "If olddate > newdate, swap them and negate at the end" -- a plain string comparison,
-    // which works because the format is fixed width and big-endian.
-    let (ndate, odate, isign) = if olddate > newdate {
-        (olddate, newdate, -1)
-    } else {
-        (newdate, olddate, 1)
-    };
-
-    let yrnew = digits(ndate, 0..4, "year")?;
-    let monew = digits(ndate, 5..7, "month")?;
-    let dynew = digits(ndate, 8..10, "day")?;
-    let yrold = digits(odate, 0..4, "year")?;
-    let moold = digits(odate, 5..7, "month")?;
-    let dyold = digits(odate, 8..10, "day")?;
-
-    for (mo, dy, yr) in [(monew, dynew, yrnew), (moold, dyold, yrold)] {
-        if !(1..=12).contains(&mo) {
-            return Err(DateError::BadField("month"));
-        }
-        let mut mday = MDAY;
-        mday[1] = nfeb(yr);
-        if dy < 1 || dy > mday[mo as usize - 1] {
-            return Err(DateError::BadField("day"));
-        }
-    }
-
-    // Days from 1 January of the old year up to each date. `337 + nfeb(i)` is the length of
-    // year `i`.
-    let mut newdys = 0;
-    for i in yrold..yrnew {
-        newdys += 337 + nfeb(i);
-    }
-    if monew > 1 {
-        let mut mday = MDAY;
-        mday[1] = nfeb(yrnew);
-        newdys += mday[..monew as usize - 1].iter().sum::<i32>();
-    }
-    newdys += dynew - 1;
-
-    let mut olddys = 0;
-    if moold > 1 {
-        let mut mday = MDAY;
-        mday[1] = nfeb(yrold);
-        olddys += mday[..moold as usize - 1].iter().sum::<i32>();
-    }
-    olddys += dyold - 1;
-
-    // At this resolution the hour/minute/second refinements below are all skipped: the guard
-    // is `olen > 10`, and olen is exactly 10.
-    Ok((newdys - olddys) * isign)
-}
-
-/// What `calc_declin` computes.
+/// What `calc_declin_components` computes.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Declination {
     /// cosine of the solar zenith angle, corrected for slope and aspect
@@ -280,18 +173,18 @@ pub struct Declination {
     pub julian: f32,
 }
 
-/// `calc_declin`, for a 19-character `YYYY-MM-DD_HH:mm:ss` date.
-pub fn calc_declin(
-    nowdate: &str,
+/// `calc_declin_components`. `iday` is the day-of-year offset as computed by [`day_of_year`].
+pub fn calc_declin_components(
+    iyear: i32,
+    iday: i32,
+    ihour: i32,
+    iminute: i32,
+    isecond: i32,
     latitude: f32,
     longitude: f32,
     slope: f32,
     azimuth: f32,
-) -> Result<Declination, DateError> {
-    if nowdate.len() != 19 {
-        return Err(DateError::BadLength(nowdate.len()));
-    }
-
+) -> Declination {
     // `REAL, PARAMETER :: DEGRAD = 3.14159265/180.`
     //
     // This is *not* the DEGRAD in ConstantsModule, which uses the literal 3.1415926 -- one
@@ -300,7 +193,6 @@ pub fn calc_declin(
     const DEGRAD: f32 = 3.14159265 / 180.;
     const DPD: f32 = 360. / 365.;
 
-    let iyear = digits(nowdate, 0..4, "year")?;
     // Open-coded rather than `nfeb(iyear) + 337`, because that is how upstream writes it and
     // the two agree only as long as both keep the 3600-year rule.
     let mut yearlen = 365;
@@ -317,10 +209,7 @@ pub fn calc_declin(
         }
     }
 
-    let iday = geth_idts(&nowdate[0..10], &format!("{}-01-01", &nowdate[0..4]))?;
-    let ihour = digits(nowdate, 11..13, "hour")?;
-    let iminute = digits(nowdate, 14..16, "minute")?;
-    let isecond = digits(nowdate, 17..19, "second")?;
+    // Determine the Julian time (floating-point day of year). Minutes are not included.
     let julian = iday as f32 + ihour as f32 / 24.;
 
     // OBECL : OBLIQUITY = 23.5 DEGREE.
@@ -360,10 +249,105 @@ pub fn calc_declin(
     let (nvx, nvy, nvz) = (0.0f32, 0.0f32, 1.0f32);
     let cosz_horiz = (nvx * svx) + (nvy * svy) + (nvz * svz);
 
-    Ok(Declination {
+    Declination {
         cosz,
         cosz_horiz,
         yearlen,
         julian,
-    })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    //! Upstream's `test/datetime_test.f90` calendar tables, which are exact. Its solar-geometry
+    //! tables are compared under a tolerance; `tests/dates_vs_fortran.rs` checks the same
+    //! routine bit for bit against a Fortran sweep instead.
+    use super::*;
+
+    /// label, (yr, mo, dy, hr, mi), dminutes, expected (yr, mo, dy, hr, mi)
+    type Advance = (&'static str, [i32; 5], i32, [i32; 5]);
+    #[rustfmt::skip]
+    const ADVANCE_CASES: &[Advance] = &[
+        ("identity zero minutes",                     [2023,  6, 15, 10, 30],      0, [2023,  6, 15, 10, 30]),
+        ("23:59 plus 1 min rolls to next day",        [2023,  6, 15, 23, 59],      1, [2023,  6, 16,  0,  0]),
+        ("Jan 31 23:59 plus 1 min -> Feb 1",          [2023,  1, 31, 23, 59],      1, [2023,  2,  1,  0,  0]),
+        ("Apr 30 23:59 plus 1 min -> May 1",          [2023,  4, 30, 23, 59],      1, [2023,  5,  1,  0,  0]),
+        ("Feb 28 23:59 plus 1 min non-leap -> Mar 1", [2023,  2, 28, 23, 59],      1, [2023,  3,  1,  0,  0]),
+        ("Feb 28 23:59 plus 1 min leap -> Feb 29",    [2024,  2, 28, 23, 59],      1, [2024,  2, 29,  0,  0]),
+        ("Feb 29 23:59 plus 1 min leap -> Mar 1",     [2024,  2, 29, 23, 59],      1, [2024,  3,  1,  0,  0]),
+        ("Dec 31 23:59 plus 1 min -> new year",       [2023, 12, 31, 23, 59],      1, [2024,  1,  1,  0,  0]),
+        ("Feb 28 2000 plus 1 day, div-400 leap",      [2000,  2, 28, 12,  0],   1440, [2000,  2, 29, 12,  0]),
+        ("Feb 28 1900 plus 1 day, div-100 not leap",  [1900,  2, 28, 12,  0],   1440, [1900,  3,  1, 12,  0]),
+        ("Feb 28 2100 plus 1 day, div-100 not leap",  [2100,  2, 28, 12,  0],   1440, [2100,  3,  1, 12,  0]),
+        ("Feb 28 2024 plus 1 day, div-4 leap",        [2024,  2, 28, 12,  0],   1440, [2024,  2, 29, 12,  0]),
+        ("Feb 28 3600 +1 day, mod-3600 not leap",     [3600,  2, 28, 12,  0],   1440, [3600,  3,  1, 12,  0]),
+        ("Mar 1 3600 -1 day, mod-3600 not leap",      [3600,  3,  1,  0,  0],  -1440, [3600,  2, 28,  0,  0]),
+        ("plus 1440 min is exactly 1 day",            [2023,  3, 10,  6, 45],   1440, [2023,  3, 11,  6, 45]),
+        ("plus 43200 min is 30 days crossing month",  [2023,  1, 15,  0,  0],  43200, [2023,  2, 14,  0,  0]),
+        ("plus 527040 min full leap year",            [2024,  1,  1,  0,  0], 527040, [2025,  1,  1,  0,  0]),
+        ("00:00 minus 1 min -> previous day",         [2023,  6, 15,  0,  0],     -1, [2023,  6, 14, 23, 59]),
+        ("Mar 1 minus 1440 min leap -> Feb 29",       [2024,  3,  1,  0,  0],  -1440, [2024,  2, 29,  0,  0]),
+        ("Mar 1 minus 1440 min non-leap -> Feb 28",   [2023,  3,  1,  0,  0],  -1440, [2023,  2, 28,  0,  0]),
+        ("Jan 1 00:00 minus 1 min -> Dec 31",         [2023,  1,  1,  0,  0],     -1, [2022, 12, 31, 23, 59]),
+        ("1998-01-01 00:00 plus 1560 min (26 h)",     [1998,  1,  1,  0,  0],   1560, [1998,  1,  2,  2,  0]),
+    ];
+
+    fn advance(d: [i32; 5], dminutes: i32) -> [i32; 5] {
+        let n = advance_datetime(d[0], d[1], d[2], d[3], d[4], dminutes);
+        [n.year, n.month, n.day, n.hour, n.minute]
+    }
+
+    #[test]
+    fn advance_datetime_table() {
+        for &(label, start, dminutes, want) in ADVANCE_CASES {
+            assert_eq!(advance(start, dminutes), want, "{label}");
+        }
+    }
+
+    /// Upstream's `minutes_between` check, reused here to pin `days_from_civil`: the advance
+    /// table read backwards.
+    #[test]
+    fn day_numbers_invert_the_advance_table() {
+        let minutes = |d: [i32; 5]| days_from_civil(d[0], d[1], d[2]) * 1440 + d[3] * 60 + d[4];
+        for &(label, start, dminutes, want) in ADVANCE_CASES {
+            assert_eq!(minutes(want) - minutes(start), dminutes, "{label}");
+        }
+    }
+
+    #[test]
+    fn day_of_year_table() {
+        #[rustfmt::skip]
+        let cases = [
+            (2024, 1, 1, 0), (2024, 2, 28, 58), (2024, 2, 29, 59), (2024, 3, 1, 60),
+            (2023, 2, 28, 58), (2023, 3, 1, 59), (2024, 12, 31, 365), (2023, 12, 31, 364),
+            (1900, 2, 28, 58), (1900, 3, 1, 59), (1900, 12, 31, 364),
+            (2000, 2, 28, 58), (2000, 2, 29, 59), (2000, 3, 1, 60), (2000, 12, 31, 365),
+            (2100, 2, 28, 58), (2100, 3, 1, 59), (2100, 12, 31, 364),
+            (3600, 2, 28, 58), (3600, 3, 1, 59), (3600, 12, 31, 364),
+        ];
+        for (yr, mo, dy, want) in cases {
+            assert_eq!(day_of_year(yr, mo, dy), want, "{yr}-{mo}-{dy}");
+        }
+        let fifteenths = [14, 45, 73, 104, 134, 165, 195, 226, 257, 287, 318, 348];
+        for (mo, want) in (1..=12).zip(fifteenths) {
+            assert_eq!(day_of_year(2023, mo, 15), want, "2023-{mo}-15");
+        }
+    }
+
+    #[test]
+    fn stepping_does_not_drift() {
+        let mut d = [1998, 1, 1, 0, 0];
+        for _ in 0..26 {
+            d = advance(d, 60);
+        }
+        assert_eq!(d, advance([1998, 1, 1, 0, 0], 26 * 60));
+    }
+
+    #[test]
+    fn civil_from_days_round_trips_four_centuries_and_the_year_3600() {
+        for days in (0..146_097).chain(year_start_day(3599)..year_start_day(3602)) {
+            let (yr, mo, dy) = civil_from_days(days);
+            assert_eq!(days_from_civil(yr, mo, dy), days, "{yr}-{mo}-{dy}");
+        }
+    }
 }

@@ -1,16 +1,17 @@
-//! `geth_newdate` and `calc_declin` against a sweep of the Fortran.
+//! `advance_datetime`, `day_of_year` and `calc_declin_components` against a sweep of the
+//! Fortran.
 //!
 //! Replaying Bondville (`utilities_vs_fortran.rs`) covers one year at one location on flat
 //! ground, which leaves leap-year handling and the slope/aspect correction untested -- both
-//! live code. `reference/datesweep_driver.f90` walks those directly: eight start dates chosen
-//! around leap years, century and 400-year exceptions and year boundaries, times fourteen
-//! offsets in both directions; and a solar-geometry grid over month, hour, latitude, longitude,
-//! slope and azimuth.
+//! live code. `reference/datesweep_driver.f90` walks those directly: twelve start dates chosen
+//! around leap years, the century, 400- and 3600-year exceptions and year boundaries, times
+//! twenty offsets in both directions; and a solar-geometry grid over year, day, hour, minute,
+//! second, latitude, longitude, slope and azimuth.
 //!
 //! Record layouts are fixed-width with no framing, so a truncated sweep is caught by the length
 //! check rather than read as a short one.
 
-use noahowp::utilities::{calc_declin, geth_newdate};
+use noahowp::utilities::{advance_datetime, calc_declin_components, day_of_year};
 
 fn fixture(name: &str) -> Vec<u8> {
     let path = format!("{}/tests/fixtures/difftest/{name}", env!("CARGO_MANIFEST_DIR"));
@@ -27,64 +28,84 @@ fn i32_at(b: &[u8], at: usize) -> i32 {
     i32::from_le_bytes(b[at..at + 4].try_into().unwrap())
 }
 
-/// `odate(12) idt(i4) ndate(12)`
-const NEWDATE_RECORD: usize = 28;
+/// `yr mo dy hr mi dminutes yr2 mo2 dy2 hr2 mi2 doy2 (12 x i4)`
+const ADVANCE_RECORD: usize = 12 * 4;
+
+fn advance_records() -> Vec<[i32; 12]> {
+    let data = fixture("advance_sweep.bin");
+    assert_eq!(data.len() % ADVANCE_RECORD, 0, "truncated advance sweep");
+    data.as_chunks::<ADVANCE_RECORD>()
+        .0
+        .iter()
+        .map(|r| std::array::from_fn(|i| i32_at(r, 4 * i)))
+        .collect()
+}
 
 #[test]
-fn geth_newdate_matches_the_fortran() {
-    let data = fixture("newdate_sweep.bin");
-    assert_eq!(data.len() % NEWDATE_RECORD, 0, "truncated newdate sweep");
+fn advance_datetime_matches_the_fortran() {
+    let records = advance_records();
     let mut failures = Vec::new();
-    let mut cases = 0;
 
-    for rec in data.as_chunks::<NEWDATE_RECORD>().0 {
-        let odate = std::str::from_utf8(&rec[0..12]).expect("ascii");
-        let idt = i32_at(rec, 12);
-        let want = std::str::from_utf8(&rec[16..28]).expect("ascii");
-
-        match geth_newdate(odate, idt) {
-            Ok(got) if got == want => {}
-            Ok(got) => failures.push(format!("{odate} + {idt}: fortran {want:?}, rust {got:?}")),
-            Err(e) => failures.push(format!("{odate} + {idt}: fortran {want:?}, rust error {e}")),
+    for r in &records {
+        let [yr, mo, dy, hr, mi, dmin, ..] = *r;
+        let n = advance_datetime(yr, mo, dy, hr, mi, dmin);
+        let got = [n.year, n.month, n.day, n.hour, n.minute, day_of_year(n.year, n.month, n.day)];
+        if got[..] != r[6..] {
+            failures.push(format!("{:?} + {dmin}: fortran {:?}, rust {got:?}", &r[..5], &r[6..]));
         }
-        cases += 1;
     }
 
-    assert!(cases >= 100, "sweep covers only {cases} cases");
+    assert!(records.len() >= 200, "sweep covers only {} cases", records.len());
     assert!(
         failures.is_empty(),
-        "{} of {cases} cases differ:\n  {}",
+        "{} of {} cases differ:\n  {}",
         failures.len(),
+        records.len(),
         failures.join("\n  ")
     );
 }
 
-/// `nowdate(19) lat lon slope azimuth cosz cosz_horiz julian (7 x r4) yearlen(i4)`
-const DECLIN_RECORD: usize = 19 + 7 * 4 + 4;
+/// Leap-year handling has to be exercised for its own sake: the sweep's start dates include
+/// 2000 (leap), 1999 (common), 2100 (the century exception), 3600 (the 3600-year exception)
+/// and 2016.
+#[test]
+fn the_sweep_actually_crosses_leap_days() {
+    let records = advance_records();
+    let lands_on = |yr, mo, dy| records.iter().any(|r| r[6..9] == [yr, mo, dy]);
+    assert!(
+        lands_on(2000, 2, 29) || lands_on(2016, 2, 29),
+        "no case lands on a leap day -- the sweep is not testing what it claims to"
+    );
+    assert!(lands_on(3600, 3, 1), "no case crosses the year-3600 February");
+}
+
+/// `yr iday hr mi sc (5 x i4) lat lon slope azimuth cosz cosz_horiz julian (7 x r4)
+/// yearlen(i4)`
+const DECLIN_RECORD: usize = 5 * 4 + 7 * 4 + 4;
 
 #[test]
-fn calc_declin_matches_the_fortran() {
+fn calc_declin_components_matches_the_fortran() {
     let data = fixture("declin_sweep.bin");
     assert_eq!(data.len() % DECLIN_RECORD, 0, "truncated declin sweep");
     let mut failures = Vec::new();
     let mut cases = 0;
 
     for rec in data.as_chunks::<DECLIN_RECORD>().0 {
-        let nowdate = std::str::from_utf8(&rec[0..19]).expect("ascii");
-        let (lat, lon) = (f32_at(rec, 19), f32_at(rec, 23));
-        let (slope, azimuth) = (f32_at(rec, 27), f32_at(rec, 31));
-        let want_cosz = f32_at(rec, 35);
-        let want_horiz = f32_at(rec, 39);
-        let want_julian = f32_at(rec, 43);
-        let want_yearlen = i32_at(rec, 47);
+        let [yr, iday, hr, mi, sc]: [i32; 5] = std::array::from_fn(|i| i32_at(rec, 4 * i));
+        let (lat, lon) = (f32_at(rec, 20), f32_at(rec, 24));
+        let (slope, azimuth) = (f32_at(rec, 28), f32_at(rec, 32));
+        let want_cosz = f32_at(rec, 36);
+        let want_horiz = f32_at(rec, 40);
+        let want_julian = f32_at(rec, 44);
+        let want_yearlen = i32_at(rec, 48);
 
-        let got = calc_declin(nowdate, lat, lon, slope, azimuth)
-            .unwrap_or_else(|e| panic!("{nowdate}: {e}"));
+        let got = calc_declin_components(yr, iday, hr, mi, sc, lat, lon, slope, azimuth);
+        let at = format!("{yr} day {iday} {hr:02}:{mi:02}:{sc:02}");
 
         let mut bad = |what: &str, g: f32, w: f32| {
             if g.to_bits() != w.to_bits() {
                 failures.push(format!(
-                    "{nowdate} lat={lat} lon={lon} slope={slope} az={azimuth}: \
+                    "{at} lat={lat} lon={lon} slope={slope} az={azimuth}: \
                      {what} fortran {w:e} ({:08X}), rust {g:e} ({:08X})",
                     w.to_bits(),
                     g.to_bits()
@@ -95,34 +116,16 @@ fn calc_declin_matches_the_fortran() {
         bad("cosz_horiz", got.cosz_horiz, want_horiz);
         bad("julian", got.julian, want_julian);
         if got.yearlen != want_yearlen {
-            failures.push(format!("{nowdate}: yearlen {want_yearlen} vs {}", got.yearlen));
+            failures.push(format!("{at}: yearlen {want_yearlen} vs {}", got.yearlen));
         }
         cases += 1;
     }
 
-    assert!(cases >= 1000, "sweep covers only {cases} cases");
+    assert!(cases >= 10_000, "sweep covers only {cases} cases");
     assert!(
         failures.is_empty(),
         "{} of {cases} cases differ:\n  {}",
         failures.len(),
         failures.iter().take(20).cloned().collect::<Vec<_>>().join("\n  ")
-    );
-}
-
-/// Leap-year handling has to be exercised for its own sake: the sweep's start dates include
-/// 2000 (leap), 1999 (common), 2100 (the century exception) and 2016.
-#[test]
-fn the_sweep_actually_crosses_leap_days() {
-    let data = fixture("newdate_sweep.bin");
-    let crossings: Vec<String> = data
-        .as_chunks::<NEWDATE_RECORD>()
-        .0
-        .iter()
-        .map(|r| std::str::from_utf8(&r[16..28]).unwrap().to_string())
-        .filter(|d| d.starts_with("20000229") || d.starts_with("20160229"))
-        .collect();
-    assert!(
-        !crossings.is_empty(),
-        "no case lands on a leap day -- the sweep is not testing what it claims to"
     );
 }

@@ -1,10 +1,17 @@
 # Porting status
 
 Upstream: [`NOAA-OWP/noah-owp-modular`](https://github.com/NOAA-OWP/noah-owp-modular)
-**pinned at `0ff055e`** ("Add OPT_BTR=4 and OPT_RSF=5 to approximate PET ...", #125).
+**pinned at `0242a96`** ("Refine CMake flag groups and driver sources.").
 
-`0ff055e` is what the `libsurfacebmi.so` in use at `/dmod/shared_libs/` is
-built from, so the reference build matches what is actually being run.
+The previous pin, `0ff055e` ("Add OPT_BTR=4 and OPT_RSF=5 to approximate PET ...", #125), is
+what the `libsurfacebmi.so` in use at `/dmod/shared_libs/` is built from. The commits between
+the two replace the build system with CMake and rework date handling in `UtilitiesModule`,
+`DomainType` and `RunModule` (issue #131). None of that changes the model's output: re-recording
+the fixtures at `0242a96` gives byte-identical recordings apart from the `domain` fields that
+replace `nowdate`. So the reference build still matches what is actually being run.
+
+A file's `Port of ... @ <commit>` header names the commit its Rust was last ported against.
+Files upstream has not touched since `0ff055e` still say `0ff055e`.
 
 ## Reference toolchain
 
@@ -33,7 +40,7 @@ the deployed library, regenerate the fixtures with `FC=gfortran-11` and diff the
 
 ```sh
 git -C /path/to/noah-owp-modular fetch origin
-git -C /path/to/noah-owp-modular log --oneline 0ff055e..origin/main -- src/ bmi/
+git -C /path/to/noah-owp-modular log --oneline 0242a96..origin/main -- src/ bmi/ driver/AsciiReadModule.f90
 ```
 
 Any file that appears there and is marked **ported** below needs its Rust counterpart
@@ -64,14 +71,15 @@ Legend: **done** -- ported and tested · **n/a** -- deliberately out of scope.
 | `src/ForcingType.f90` | `noahowp/src/forcing.rs` | done |
 | `src/EnergyType.f90` | `noahowp/src/energy.rs` | done |
 | `src/WaterType.f90` | `noahowp/src/water.rs` | done |
-| `src/UtilitiesModule.f90` | `noahowp/src/utilities.rs` | done (the shapes `UtilitiesMain` calls) |
+| `src/UtilitiesModule.f90` | `noahowp/src/utilities.rs` | done (all but `minutes_between`) |
 | `src/RunModule.f90` | `noahowp/src/run.rs` | done -- `initialize_from_file`, `advance_in_time`, `solve_noahowp` (`tests/timestep_loop_vs_fortran.rs`) |
 
-`UtilitiesModule.f90`'s `geth_newdate` and `geth_idts` handle punctuated and unpunctuated
-dates at six resolutions with fractional seconds. `UtilitiesMain` calls each exactly one way --
-a 12-character `YYYYMMDDHHMM` date with an offset in minutes, and two 10-character `YYYY-MM-DD`
-dates -- so only those shapes are ported. Anything else is a typed error; upstream reaches
-`call abort()` on most of them. The unported branches have no caller and no way to test them.
+`UtilitiesModule.f90` carries dates as integer components. `DomainType` parses `startdate` once
+at init (`read(startdate, '(I4,4I2)')`), and `UtilitiesMain` advances those components with
+`advance_datetime` before calling `calc_declin_components`. `minutes_between` is not ported:
+its only caller is the ASCII forcing reader. A start month outside 1 to 12 is a typed error at
+init; the Fortran would index its month table out of bounds. Every other out-of-range component
+is well-defined arithmetic upstream (Feb 30 is Mar 2), and the port accepts it too.
 
 `ParametersRead.f90` also contains `read_crop_parameters`, `read_irrigation_parameters`,
 `read_tiledrain_parameters` and `read_optional_parameters` -- roughly 450 lines. `paramRead`
@@ -257,12 +265,12 @@ someone tidies it up.
     Their `RunModule` assignments are commented out upstream. On the BMI path they arrive via
     `set_value` before the first `update`. (`run.rs`)
 
-15. **`calc_declin` has its own `DEGRAD`, and it is not the one in `ConstantsModule`.**
+15. **`calc_declin_components` has its own `DEGRAD`, and it is not the one in `ConstantsModule`.**
     The local parameter is `3.14159265/180.`; the module constant uses the literal `3.1415926`,
     one digit shorter. Two constants, same name, different value. (`utilities.rs`)
 
 16. **`nfeb` has a 3600-year rule**, which is not part of the Gregorian calendar. It changes
-    nothing before the year 3600 and is reproduced rather than corrected. `calc_declin`
+    nothing before the year 3600 and is reproduced rather than corrected. `calc_declin_components`
     open-codes the same rule a second time for `yearlen`. (`utilities.rs`)
 
 17. **`idt = itime * (domain%dt / 60)` divides in real and truncates on assignment.**

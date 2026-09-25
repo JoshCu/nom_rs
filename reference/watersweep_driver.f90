@@ -106,6 +106,7 @@ contains
 
   subroutine read_forcing_year()
     integer :: n, forcing_timestep, ierr
+    integer :: read_yr, read_mo, read_dy, read_hr, read_mi
     allocate(model)
     call initialize_from_file(model, trim(config_file))
     n = model%domain%ntime
@@ -113,9 +114,14 @@ contains
              f_prcp(n))
     associate(domain => model%domain)
     do while (domain%time_dbl < domain%ntime * domain%dt)
-      ! UtilitiesMain advances nowdate, which is what the reader keys on.
+      ! The reader keys on the beginning-of-timestep date, as solve_noahowp computes it.
       forcing_timestep = domain%dt
-      call read_forcing_text(10, domain%nowdate, forcing_timestep, f_uu(domain%itime), &
+      call advance_datetime(domain%start_year, domain%start_month, domain%start_day, &
+                            domain%start_hour, domain%start_minute,                  &
+                            int((domain%itime - 1) * (domain%dt / 60)),              &
+                            read_yr, read_mo, read_dy, read_hr, read_mi)
+      call read_forcing_text(10, read_yr, read_mo, read_dy, read_hr, read_mi, &
+           forcing_timestep, f_uu(domain%itime), &
            f_vv(domain%itime), f_sfctmp(domain%itime), f_q2(domain%itime), &
            f_sfcprs(domain%itime), f_soldn(domain%itime), f_lwdn(domain%itime), &
            f_prcp(domain%itime), ierr)

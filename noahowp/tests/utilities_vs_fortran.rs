@@ -47,28 +47,22 @@ fn utilities_main_reproduces_the_fortran() {
         // exactly what the Fortran started from.
         let d = before.state("domain");
         m.domain.dt = d.f32("DT");
-        m.domain.startdate = d.str("startdate");
-        m.domain.nowdate = d.str("nowdate");
+        m.domain.start_year = d.i32("start_year");
+        m.domain.start_month = d.i32("start_month");
+        m.domain.start_day = d.i32("start_day");
+        m.domain.start_hour = d.i32("start_hour");
+        m.domain.start_minute = d.i32("start_minute");
         m.domain.lat = d.f32("lat");
         m.domain.lon = d.f32("lon");
         m.domain.terrain_slope = d.f32("terrain_slope");
         m.domain.azimuth = d.f32("azimuth");
 
-        utilities_main(before.itime, &mut m.domain, &mut m.forcing, &mut m.energy)
-            .unwrap_or_else(|e| panic!("itime {}: {e}", before.itime));
+        utilities_main(before.itime, &m.domain, &mut m.forcing, &mut m.energy);
 
-        let da = after.state("domain");
         let ea = after.state("energy");
         let fa = after.state("forcing");
         let at = before.itime;
 
-        if m.domain.nowdate != da.str("nowdate") {
-            failures.push(format!(
-                "itime {at}: nowdate fortran {:?}, rust {:?}",
-                da.str("nowdate"),
-                m.domain.nowdate
-            ));
-        }
         for (name, got, want) in [
             ("energy%COSZ", m.energy.COSZ, ea.f32("COSZ")),
             ("energy%COSZ_HORIZ", m.energy.COSZ_HORIZ, ea.f32("COSZ_HORIZ")),
@@ -105,9 +99,10 @@ fn utilities_main_reproduces_the_fortran() {
     );
 }
 
-/// The call is supposed to touch five fields and nothing else. Checking what the *Fortran*
-/// changed -- rather than what the Rust changed -- is what catches an output the port never
-/// knew about, which would otherwise look like agreement.
+/// The call is supposed to touch four fields and nothing else -- none of them in `domain`,
+/// since the current date is a local. Checking what the *Fortran* changed -- rather than what
+/// the Rust changed -- is what catches an output the port never knew about, which would
+/// otherwise look like agreement.
 #[test]
 fn utilities_main_touches_only_what_the_port_reproduces() {
     let recording = Fixture::parse(&fixture_bytes("difftest/bondville.difftest")).expect("fixture");
@@ -115,7 +110,7 @@ fn utilities_main_touches_only_what_the_port_reproduces() {
 
     for (before, after) in recording.pairs(Call::Utilities) {
         for (ty, allowed) in [
-            ("domain", &["nowdate"][..]),
+            ("domain", &[][..]),
             ("energy", &["COSZ", "COSZ_HORIZ"][..]),
             ("forcing", &["YEARLEN", "JULIAN"][..]),
             ("water", &[][..]),

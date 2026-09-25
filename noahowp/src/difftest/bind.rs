@@ -193,7 +193,11 @@ pub fn walk<B: Binder>(b: &mut B, m: &mut NoahOwp, rec: &Record) {
     b.f32(s, "DT", &mut m.domain.dt);
     b.string(s, "startdate", &mut m.domain.startdate);
     b.string(s, "enddate", &mut m.domain.enddate);
-    b.string(s, "nowdate", &mut m.domain.nowdate);
+    b.i32(s, "start_year", &mut m.domain.start_year);
+    b.i32(s, "start_month", &mut m.domain.start_month);
+    b.i32(s, "start_day", &mut m.domain.start_day);
+    b.i32(s, "start_hour", &mut m.domain.start_hour);
+    b.i32(s, "start_minute", &mut m.domain.start_minute);
     b.f64(s, "start_datetime", &mut m.domain.start_datetime);
     b.f64(s, "end_datetime", &mut m.domain.end_datetime);
     b.f64(s, "curr_datetime", &mut m.domain.curr_datetime);

@@ -17,7 +17,7 @@
 #![allow(clippy::excessive_precision)]
 // `approx_constant` wants `3.14159265` replaced with `PI`. They are not the same number in
 // f32, and the Fortran has two different pi literals of its own -- `ConstantsModule`'s DEGRAD
-// uses `3.1415926` while `calc_declin`'s uses `3.14159265`. Literals stay as found.
+// uses `3.1415926` while `calc_declin_components`'s uses `3.14159265`. Literals stay as found.
 #![allow(clippy::approx_constant)]
 
 pub mod constants;

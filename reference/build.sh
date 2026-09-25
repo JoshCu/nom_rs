@@ -26,7 +26,7 @@ if [ -z "${NOM_SRC:-}" ]; then
   done
 fi
 NOM_SRC=${NOM_SRC:-}
-NOM_COMMIT=${NOM_COMMIT:-0ff055efd93c37f5bce83255f06180e2e779cea6}
+NOM_COMMIT=${NOM_COMMIT:-0242a96c2a90b2c1501ff56a1e457a932a49c8ac}
 FC=${FC:-gfortran}
 NSAMPLES=${NSAMPLES:-200}
 BUILD=$PWD/build
@@ -99,7 +99,7 @@ FIX=$HERE/../noahowp/tests/fixtures/difftest
 mkdir -p "$FIX"
 ./difftest run/namelist.input "$FIX/bondville.difftest" "$NSAMPLES"
 ./paramsweep run/namelist.input "$FIX/param_sweep.difftest"
-./datesweep "$FIX/newdate_sweep.bin" "$FIX/declin_sweep.bin"
+./datesweep "$FIX/advance_sweep.bin" "$FIX/declin_sweep.bin"
 ./atmsweep run/namelist.input "$FIX/atm_sweep.difftest"
 ./interceptsweep run/namelist.input "$FIX/intercept_sweep.difftest"
 ./watersweep run/namelist.input "$FIX/water_sweep.difftest"

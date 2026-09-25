@@ -133,7 +133,11 @@ fn initial_state_matches_the_fortran() {
     r.f32(s, "DT", m.domain.dt);
     r.str(s, "startdate", &m.domain.startdate);
     r.str(s, "enddate", &m.domain.enddate);
-    r.str(s, "nowdate", &m.domain.nowdate);
+    r.i32(s, "start_year", m.domain.start_year);
+    r.i32(s, "start_month", m.domain.start_month);
+    r.i32(s, "start_day", m.domain.start_day);
+    r.i32(s, "start_hour", m.domain.start_hour);
+    r.i32(s, "start_minute", m.domain.start_minute);
     r.f64(s, "start_datetime", m.domain.start_datetime);
     r.f64(s, "end_datetime", m.domain.end_datetime);
     r.i32(s, "itime", m.domain.itime);

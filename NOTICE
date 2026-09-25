@@ -2,7 +2,7 @@ nom_rs
 Copyright (c) 2026 Josh Cunningham
 
 This project is a Rust translation of Noah-OWP-Modular
-(https://github.com/NOAA-OWP/noah-owp-modular), pinned at commit 0ff055e, which
+(https://github.com/NOAA-OWP/noah-owp-modular), pinned at commit 0242a96, which
 is licensed under the Apache License, Version 2.0. A copy of that license is in
 licenses/noah-owp-modular-Apache-2.0.txt.
 

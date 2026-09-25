@@ -58,20 +58,23 @@ It earns its keep: a 1-ULP error from writing `kdt` as `refkdt * (dksat(1) / ref
 
 ## The date sweep
 
-`datesweep` writes `newdate_sweep.bin` and `declin_sweep.bin`. Replaying Bondville covers one
+`datesweep` writes `advance_sweep.bin` and `declin_sweep.bin`. Replaying Bondville covers one
 year at one location on flat ground, which exercises neither leap-year handling nor the
-slope/aspect correction in `calc_declin` -- both live code the port has to get right.
+slope/aspect correction in `calc_declin_components` -- both live code the port has to get right.
 
-The sweep walks them directly: eight start dates chosen around leap years, the century and
-400-year exceptions and year boundaries, times fourteen offsets in both directions; and a solar
-geometry grid over month, hour, latitude, longitude, slope and azimuth (20,160 cases).
+The sweep walks them directly. `advance_datetime` gets twelve start dates, chosen around leap
+years, the century, 400-year and 3600-year exceptions, year boundaries and an out-of-range day,
+times twenty offsets in both directions, up to a billion minutes (233 cases). Each result also
+records its `day_of_year`. `calc_declin_components` gets a grid over year, day of year, hour,
+minute, second, latitude, longitude, slope and azimuth (43,008 cases).
 
 Both files are fixed-width records with no framing, since the layouts do not change and the
 reader knows them:
 
 ```text
-newdate: odate(12) idt(i4) ndate(12)
-declin:  nowdate(19) lat lon slope azimuth cosz cosz_horiz julian (7 x r4) yearlen(i4)
+advance: yr mo dy hr mi dminutes yr2 mo2 dy2 hr2 mi2 doy2 (12 x i4)
+declin:  yr iday hr mi sc (5 x i4) lat lon slope azimuth cosz cosz_horiz julian (7 x r4)
+         yearlen(i4)
 ```
 
 ## The ATM sweep

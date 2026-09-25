@@ -1,4 +1,4 @@
-//! Port of `src/RunModule.f90` @ 0ff055e.
+//! Port of `src/RunModule.f90` @ 0242a96.
 //!
 //! `initialize_from_file` builds the model and then overwrites a long list of state that the
 //! `*Type` modules had just set to `huge(1.0)`. That second pass is not decoration: it is where
@@ -11,7 +11,7 @@
 
 #![allow(non_snake_case)]
 
-use crate::date_time_utils::{get_utime_list, unix_to_date, DateError};
+use crate::date_time_utils::{get_utime_list, DateError};
 use crate::domain::Domain;
 use crate::energy::Energy;
 use crate::forcing::Forcing;
@@ -28,29 +28,21 @@ use crate::physics::water_main::water_main;
 use crate::utilities::utilities_main;
 use crate::water::Water;
 
-/// Why a timestep could not be taken. Upstream `stop`s on both.
+/// Why a timestep could not be taken. Upstream `stop`s.
 #[derive(Debug)]
 pub enum StepError {
-    Date(DateError),
     Energy(EmittedLongwaveNotPositive),
 }
 
 impl std::fmt::Display for StepError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            StepError::Date(e) => write!(f, "{e}"),
             StepError::Energy(e) => write!(f, "{e}"),
         }
     }
 }
 
 impl std::error::Error for StepError {}
-
-impl From<DateError> for StepError {
-    fn from(e: DateError) -> Self {
-        StepError::Date(e)
-    }
-}
 
 impl From<EmittedLongwaveNotPositive> for StepError {
     fn from(e: EmittedLongwaveNotPositive) -> Self {
@@ -120,8 +112,8 @@ impl NoahOwp {
         //
         // Upstream indexes `sim_datetimes(itime)` unchecked, which reads past the end of the
         // list once a driver steps beyond `end_time` (bmi-driver's `allow_exceed_end_time`).
-        // The value only feeds `unix_to_date`, whose results are unused, so past the end
-        // `curr_datetime` is extrapolated by dt rather than read out of bounds.
+        // Nothing in the timestep reads the value, so past the end `curr_datetime` is
+        // extrapolated by dt rather than read out of bounds.
         let i = (domain.itime - 1) as usize;
         domain.curr_datetime = match domain.sim_datetimes.get(i) {
             Some(&t) => t,
@@ -133,9 +125,8 @@ impl NoahOwp {
                 None => domain.curr_datetime,
             },
         };
-        let _ = unix_to_date(domain.curr_datetime);
 
-        utilities_main(domain.itime, domain, &mut self.forcing, &mut self.energy)?;
+        utilities_main(domain.itime, domain, &mut self.forcing, &mut self.energy);
 
         forcing_main(
             &self.options,
@@ -295,7 +286,6 @@ impl NoahOwp {
         }
 
         // time variables
-        domain.nowdate = domain.startdate.clone(); // start the model with nowdate = startdate
         domain.itime = 1; // initialize the time loop counter at 1
         domain.time_dbl = 0.0; // start model run at t = 0
 
