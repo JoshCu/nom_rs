@@ -10,7 +10,7 @@ repository = "https://github.com/JoshCu/nom_rs"
 
 [profile.release]
 # Bit-identity: LLVM will not reassociate floats without fast-math, which Rust
-# never enables. Keep it that way -- see docs/RUST_REWRITE_PLAN.md section 3.2.
+# never enables. Keep it that way -- see docs/design.md section 3.2.
 opt-level = 3
 lto = true
 codegen-units = 1

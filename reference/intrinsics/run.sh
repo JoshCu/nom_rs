@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Phase 0: does any Rust spelling of each intrinsic match gfortran bit for bit?
+# Does any Rust spelling of each intrinsic match gfortran bit for bit?
 #
 # Requires gfortran, rustc and python3. Run from this directory:
 #     ./run.sh
@@ -7,7 +7,7 @@
 # Exit status 0 means every intrinsic has a candidate that is bit-identical *at both Rust
 # optimisation levels* -- the "byte identical" goal is achievable and the port should use the
 # candidates named in the output. Non-zero means at least one intrinsic has no such candidate;
-# read docs/RUST_REWRITE_PLAN.md section 6.4 before continuing.
+# read "Interpreting the result" in README.md before continuing.
 #
 # Why both optimisation levels: at -O, LLVM rewrites `x.powf(2.0)` into `x * x`, so `powf`
 # looks bit-identical to gfortran when the real powf call is not. Debug builds -- which is how
@@ -80,7 +80,7 @@ if [ ${#failed[@]} -eq 0 ]; then
   exit 0
 fi
 echo "NO-GO for strict bit-identity on: ${failed[*]}"
-echo "Options, in the plan's section 6.4:"
+echo "Options (see README.md, \"Interpreting the result\"):"
 echo "  - accept a documented ULP-level exception for these, quantified over a full year run"
 echo "  - or gate them behind a strict-libm feature that links the exact symbols"
 exit 1

@@ -1,0 +1,24 @@
+nom_rs
+Copyright (c) 2026 Josh Cunningham
+
+This project is a Rust translation of Noah-OWP-Modular
+(https://github.com/NOAA-OWP/noah-owp-modular), pinned at commit 0ff055e, which
+is licensed under the Apache License, Version 2.0. A copy of that license is in
+licenses/noah-owp-modular-Apache-2.0.txt.
+
+The files under noahowp/src/ and noahowp-bmi/src/ are translated from the
+Fortran sources of Noah-OWP-Modular; each ported function names the upstream
+file and subroutine it was translated from. The following are verbatim copies
+of upstream files, unmodified:
+
+  noahowp/tests/fixtures/MPTABLE.TBL     (parameters/MPTABLE.TBL)
+  noahowp/tests/fixtures/SOILPARM.TBL    (parameters/SOILPARM.TBL)
+  noahowp/tests/fixtures/GENPARM.TBL     (parameters/GENPARM.TBL)
+  noahowp/tests/fixtures/namelist.input  (run/namelist.input)
+
+Noah-OWP-Modular was itself developed from the Noah-MP land surface model
+(https://github.com/NCAR/noahmp).
+
+Noah-OWP-Modular is a scientific product of NOAA's Office of Water Prediction.
+This project is not affiliated with or endorsed by NOAA, the National Weather
+Service or NCAR.

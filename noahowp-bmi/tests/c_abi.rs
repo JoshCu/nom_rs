@@ -7,7 +7,7 @@ use std::mem::MaybeUninit;
 
 fn config() -> tempfile::Path {
     let tables = concat!(env!("CARGO_MANIFEST_DIR"), "/../noahowp/tests/fixtures/");
-    let text = include_str!("namelist.input")
+    let text = include_str!("../../noahowp/tests/fixtures/namelist.input")
         .replace("\"../parameters/\"", &format!("\"{tables}\""));
     tempfile::write(&text)
 }

@@ -1,9 +1,9 @@
-# Phase 0: intrinsic drift
+# Intrinsic drift probe
 
 **The go/no-go on "byte identical".** Everything else in the port is mechanical translation
 that a differential test can verify. This is the one question that could make strict
-bit-identity unachievable no matter how carefully the physics is translated, so it is answered
-first, before the ~9k lines of physics get written.
+bit-identity unachievable no matter how carefully the physics is translated, so it was answered
+first, before any physics was written. Re-run it whenever gfortran or rustc changes.
 
 ## The question
 
@@ -93,8 +93,8 @@ negative bases; the rest stay inside their domain so neither probe produces a Na
 **GO.** Run 2026-09-18 against GNU Fortran 15.2.0 (Ubuntu 15.2.0-16ubuntu1), rustc 1.98.1, at
 20k and 200k inputs per intrinsic, and re-run 2026-09-21 with the constant real exponents
 added: every intrinsic the model uses has a bit-identical Rust candidate at both optimisation
-levels. Strict bit-identity is achievable, and the plan's
-section 6.4 fallback is not needed.
+levels. Strict bit-identity is achievable, and the fallback described under
+"Interpreting the result" is not needed.
 
 The winners are recorded in `noahowp/src/fortran/intrinsics.rs`, whose tests carry gfortran's
 own answers as vectors -- so a future rustc that expands `llvm.powi` differently fails CI there
@@ -162,8 +162,7 @@ fail. `intrinsics.rs` puts the inputs behind `black_box` for this reason.
 - **All EXACT** -> strict bit-identity is achievable. Wire the winning candidates into
   `fortran/intrinsics.rs` and treat any later use of a bare `f32::exp` in ported physics as a
   bug (worth a CI grep). This is what happened; see the verdict above.
-- **Some intrinsics have no match** -> do not abandon the port. Take the plan's section 6.4
-  route: pin the divergence to a named function list, quantify the drift over a full Bondville
+- **Some intrinsics have no match** -> do not abandon the port. Take the fallback route: pin the divergence to a named function list, quantify the drift over a full Bondville
   year, and decide whether "agrees to N ULP over 17,520 timesteps" is good enough for
   calibration. It very likely is; what matters is that the number is measured rather than
   assumed.

@@ -1,6 +1,6 @@
 //! Port of `bmi/bmi_noahowp.f90` @ 0ff055e.
 //!
-//! Scope is what `bmi-driver` actually calls -- see `docs/RUST_REWRITE_PLAN.md` section 1.1.
+//! Scope is what `bmi-driver` actually calls -- see `docs/design.md` section 1.
 //! `get_value_ptr`, `*_at_indices` and the extended grid functions are deliberately absent.
 //! [`c_abi`] exposes this as a C BMI through `register_bmi`.
 
@@ -76,7 +76,7 @@ pub type BmiResult<T> = Result<T, BmiError>;
 /// `bmi_noahowp`.
 ///
 /// Holds no globals, so instances are independent and `Send` -- which is what lets a driver run
-/// many catchments as threads rather than as processes. See the plan, section 4.
+/// many catchments as threads rather than as processes. See `docs/design.md`, section 7.
 #[derive(Debug, Default)]
 pub struct BmiNoahOwp {
     model: Option<Box<NoahOwp>>,
@@ -430,7 +430,7 @@ impl BmiNoahOwp {
 }
 
 /// A model instance carries no global state, so a driver can run catchments on threads.
-/// See the plan, section 4 -- this is the property that lets `bmi-driver` drop its
+/// See `docs/design.md`, section 7 -- this is the property that lets `bmi-driver` drop its
 /// subprocess + IPC worker protocol for Rust-only realizations.
 #[allow(dead_code)]
 fn _assert_model_is_send() {
@@ -442,7 +442,7 @@ mod tests {
     use super::*;
     use std::io::Write;
 
-    const NAMELIST: &str = include_str!("../tests/namelist.input");
+    const NAMELIST: &str = include_str!("../../noahowp/tests/fixtures/namelist.input");
 
     /// The Bondville namelist, pointed at the verbatim upstream tables the model crate tests
     /// against.

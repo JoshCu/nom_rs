@@ -92,7 +92,7 @@ hand-placed cases are the ones a random sweep will not find --
   direct irradiance over the solar constant;
 - frozen precipitation of exactly zero under `OPT_SNF == 4`, where upstream divides 0 by 0 and
   `bdfall` goes NaN. That is live code, so reproducing the NaN is part of the contract;
-- four wind speeds taken from the intrinsic spike's own report, where `UU ** 2.` and a `powf`
+- four wind speeds taken from the intrinsic probe's own report (`intrinsics/`), where `UU ** 2.` and a `powf`
   call disagree. Those two spellings differ on 0.04% of inputs, which a sweep this size would
   otherwise reach about once by luck -- and a port that used `powf` there passed both this
   sweep and the Bondville year until these four cases were added.
@@ -175,7 +175,7 @@ afterwards so the replay continues on its own trajectory:
 2. **Infiltration capacity** -- a near-saturated top layer under heavy ponding, so that more
    water arrives in a sub-step than `DYNAMIC_VIC` can take in (`FMAX*DT < DP`). The two
    branches that follow are the ones where upstream reads `YD` before assigning it; see
-   `PORTING.md`. Run under all three infiltration equations.
+   `docs/porting.md`. Run under all three infiltration equations.
 3. **A deep MMF water table**, where `SSTEP` accumulates recharge instead of updating `SMCWTD`.
 
 Some legal option pairings drive the column out of physical range -- `drainage_option = 1` is
@@ -226,13 +226,13 @@ port has to reproduce. Never `-ffast-math`.
 | | |
 |---|---|
 | `NOM_SRC` | upstream checkout; searched for if unset |
-| `NOM_COMMIT` | commit to build; defaults to the pin in `PORTING.md` |
+| `NOM_COMMIT` | commit to build; defaults to the pin in `docs/porting.md` |
 | `FC` | Fortran compiler, default `gfortran` |
 | `NSAMPLES` | timesteps sampled per call, default 200 (~3 MB of fixtures) |
 
 `FC` is worth knowing about. Bit-identity is a claim about a **(compiler, libc) pair**, and the
 `libsurfacebmi.so` in use at `/dmod/shared_libs/` was built with GCC 11.5.0 on Red Hat, not the
-GCC 15.2.0 these fixtures were generated with. The intrinsic spike found no divergence that
+GCC 15.2.0 these fixtures were generated with. The intrinsic probe (`intrinsics/`) found no divergence that
 depends on the compiler version, but that was measured on one pair. If the calibration target
 is the deployed library, regenerate with a matching `FC` and diff the fixtures.
 

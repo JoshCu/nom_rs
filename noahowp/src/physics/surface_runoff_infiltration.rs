@@ -25,7 +25,7 @@ use crate::water::Water;
 /// stack slot and these calls see whatever that slot last held. Zero is what `YD` is set to on
 /// every other path into the same `RR1` call. The water sweep enters both branches and the
 /// reference build agrees with any value from `0.0` to `1e-3` and not with `0.5` -- a
-/// measurement of this build, not a guarantee; see `PORTING.md`.
+/// measurement of this build, not a guarantee; see `docs/porting.md`.
 ///
 /// `RR1` of a zero depth is exactly `+0.0`, which makes the `IITERATION30` / `IITERATION3`
 /// branches below each of these calls unreachable. Only a non-zero `YD` could enter them.

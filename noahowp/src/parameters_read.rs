@@ -10,7 +10,7 @@
 //! `read_global_parameters`. `read_crop_parameters`, `read_irrigation_parameters`,
 //! `read_tiledrain_parameters` and `read_optional_parameters` are never called from the BMI
 //! path (`crop_model_option = 0` is the only supported value), and porting ~450 lines of
-//! tables that nothing can read would be dead weight. See `PORTING.md`.
+//! tables that nothing can read would be dead weight. See `docs/porting.md`.
 //!
 //! # Sentinels
 //!

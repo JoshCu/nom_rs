@@ -7,11 +7,11 @@
 //!
 //! # Where these came from
 //!
-//! `spike/intrinsics/run.sh` puts every plausible Rust spelling of each operation against
+//! `reference/intrinsics/run.sh` puts every plausible Rust spelling of each operation against
 //! gfortran over 20k inputs per intrinsic, comparing raw bit patterns. Verdict as run on
 //! 2026-09-18, GNU Fortran 15.2.0 (Ubuntu 15.2.0-16ubuntu1) / rustc 1.98.1, `-O2
 //! -ffp-contract=off`: **every intrinsic the model uses has a bit-identical Rust candidate**,
-//! at both `-O` and `-O0`. Strict bit-identity is achievable; see `PORTING.md`.
+//! at both `-O` and `-O0`. Strict bit-identity is achievable; see `docs/porting.md`.
 //!
 //! # The rules, and why the obvious spellings lose
 //!
@@ -117,7 +117,7 @@ pub fn atan(x: f32) -> f32 {
 ///
 /// `copysign`, not `if b >= 0.0`. Reading the standard suggests the latter, since `-0.0 >= 0`
 /// is true and the standard says "`|a|` when `b >= 0`" -- but gfortran returns `-|a|` for
-/// `b = -0.0`, following IEEE. The spike probes `-0.0` explicitly for this reason.
+/// `b = -0.0`, following IEEE. The probe tests `-0.0` explicitly for this reason.
 #[inline]
 pub fn sign(a: f32, b: f32) -> f32 {
     a.abs().copysign(b)
@@ -188,7 +188,7 @@ pub fn pow2_real(x: f32) -> f32 {
 /// Spelled as a comparison rather than as `f32::min`, so that the result on a tie is fixed by
 /// this source and not by LLVM: **the second argument wins when the two compare equal or when
 /// the first is NaN.** Fortran does not define `MIN` when an argument is NaN, and leaves the
-/// sign of the result unspecified when the arguments are `+0.0` and `-0.0`; the spike measured
+/// sign of the result unspecified when the arguments are `+0.0` and `-0.0`; the probe measured
 /// gfortran returning the second argument in both cases, and `f32::min` happened to agree --
 /// but `llvm.minnum` documents "either one" for the zeros, so the agreement was luck, not a
 /// contract. `if a <= b { a } else { b }` does not agree: it returns `-0.0` where gfortran
@@ -196,7 +196,7 @@ pub fn pow2_real(x: f32) -> f32 {
 ///
 /// # Ties are decided by GCC, per call site
 ///
-/// The spike's "second argument wins" holds for `MIN(x, 0.0)` and `MAX(x, 0.0)`, where the
+/// The probe's "second argument wins" holds for `MIN(x, 0.0)` and `MAX(x, 0.0)`, where the
 /// constant is second. It does **not** hold in general: gfortran lowers `MIN` to a `MIN_EXPR`
 /// that the middle end treats as commutative, so which operand lands where depends on
 /// constant canonicalisation, SSA numbering and inlining at that site. `EtFluxModule`'s
@@ -234,7 +234,7 @@ mod tests {
     use super::*;
 
     /// `(argument, gfortran's answer)`, as bit patterns. Produced by
-    /// `spike/intrinsics/probe.f90` under GNU Fortran 15.2.0, `-O2 -ffp-contract=off`.
+    /// `reference/intrinsics/probe.f90` under GNU Fortran 15.2.0, `-O2 -ffp-contract=off`.
     ///
     /// Each set is a spread across the intrinsic's realistic argument range plus every
     /// argument at which a losing candidate diverged -- those are the discriminating ones, so

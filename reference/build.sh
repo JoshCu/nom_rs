@@ -6,7 +6,7 @@
 #
 # Environment:
 #   NOM_SRC     upstream noah-owp-modular checkout (searched for if unset)
-#   NOM_COMMIT  commit to build (default: the pin in PORTING.md)
+#   NOM_COMMIT  commit to build (default: the pin in docs/porting.md)
 #   FC          Fortran compiler (default: gfortran)
 #   NSAMPLES    timesteps to sample per physics call (default: 200)
 #

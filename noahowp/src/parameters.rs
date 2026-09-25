@@ -348,7 +348,7 @@ impl Parameters {
         let refdk = gen.refdk;
         // Kept as written: `refkdt * dksat(1) / refdk` associates left to right, and
         // `a * b / c` is not `a * (b / c)` in binary32. This same expression is duplicated
-        // inline in two places in `bmi_noahowp.f90`; see PORTING.md.
+        // inline in two places in `bmi_noahowp.f90`; see docs/porting.md.
         let kdt = refkdt * dksat[1] / refdk;
         let frzx = 0.15 * (smcmax[1] / smcref[1]) * (0.412 / 0.468);
 

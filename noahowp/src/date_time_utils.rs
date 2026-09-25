@@ -2,7 +2,7 @@
 //!
 //! The upstream module also vendors a general string-utility library (`parse`, `compact`,
 //! `shiftstr`, `writeq_*`, ...). None of it is reachable from the BMI path, so none of it is
-//! ported. See `PORTING.md`.
+//! ported. See `docs/porting.md`.
 //!
 //! Entry points actually used by the model:
 //! `date_to_unix` (DomainType), `unix_to_date` and `get_utime_list` (RunModule).

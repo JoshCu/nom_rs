@@ -3,26 +3,21 @@
 Upstream: [`NOAA-OWP/noah-owp-modular`](https://github.com/NOAA-OWP/noah-owp-modular)
 **pinned at `0ff055e`** ("Add OPT_BTR=4 and OPT_RSF=5 to approximate PET ...", #125).
 
-The pin moved from `eaa8282` once a Fortran toolchain was available, because `0ff055e` is what
-the `libsurfacebmi.so` in use at `/dmod/shared_libs/` is built from, and the reference build
-should match what is actually being run. The cost was small: the four files that changed are
-additive, every new branch is gated behind `OPT_BTR == 4` or `OPT_RSF == 5`, and no existing
-option path differs. Only the namelist bounds needed porting (`stomatal_resistance_option` to
-1-4, `evap_srfc_resistance_option` to 1-5). The two new option bodies land with
-`EnergyModule`/`EtFluxModule`.
+`0ff055e` is what the `libsurfacebmi.so` in use at `/dmod/shared_libs/` is
+built from, so the reference build matches what is actually being run.
 
 ## Reference toolchain
 
 Bit-identity is a claim about a specific pair of compilers, so both are pinned here. Changing
-either means re-running `spike/intrinsics/run.sh`.
+either means re-running `reference/intrinsics/run.sh`.
 
 | | Version | Flags |
 |---|---|---|
 | Reference Fortran | GNU Fortran 15.2.0 (Ubuntu 15.2.0-16ubuntu1) | `-O2 -ffp-contract=off -cpp -DNGEN_OUTPUT_ACTIVE`; never `-ffast-math` |
 | Rust | rustc 1.98.1 | stock `dev` and `release` profiles; the intrinsic verdict holds at both |
 
-The intrinsic spike was run against these on 2026-09-18 and returned **GO**: every intrinsic
-the model uses has a bit-identical Rust spelling. See `spike/intrinsics/README.md` for the
+The intrinsic probe was run against these on 2026-09-18 and returned **GO**: every intrinsic
+the model uses has a bit-identical Rust spelling. See `reference/intrinsics/README.md` for the
 verdict and `noahowp/src/fortran/intrinsics.rs` for the spellings ported code must use.
 
 `NGEN_FORCING_ACTIVE` is deliberately *not* defined for the reference build: leaving the ASCII
@@ -31,14 +26,14 @@ The shipping BMI path still compiles it out.
 
 **Bit-identity is a claim about a (compiler, libc) pair.** The `libsurfacebmi.so` at
 `/dmod/shared_libs/` was built with GCC 11.5.0 on Red Hat, not the GCC 15.2.0 above. Nothing the
-spike measured varies with compiler version, but that was one pair; if the calibration target is
+probe measured varies with compiler version, but that was one pair; if the calibration target is
 the deployed library, regenerate the fixtures with `FC=gfortran-11` and diff them.
 
 ## How to track upstream
 
 ```sh
 git -C /path/to/noah-owp-modular fetch origin
-git -C /path/to/noah-owp-modular log --oneline eaa8282..origin/main -- src/ bmi/
+git -C /path/to/noah-owp-modular log --oneline 0ff055e..origin/main -- src/ bmi/
 ```
 
 Any file that appears there and is marked **ported** below needs its Rust counterpart
@@ -51,8 +46,7 @@ port a change, bump the commit in that header and in the table below.
 
 ## Status
 
-Legend: **done** -- ported and tested · **stub** -- surface exists, body outstanding ·
-**todo** -- not started · **n/a** -- deliberately out of scope.
+Legend: **done** -- ported and tested · **n/a** -- deliberately out of scope.
 
 ### Configuration and support
 
@@ -177,9 +171,9 @@ nothing reaches. Each is copied as written.
 | Upstream | Rust | Status |
 |---|---|---|
 | `bmi/bmi_noahowp.f90` (metadata, grids, time) | `noahowp-bmi/src/lib.rs`, `vars.rs` | done |
-| `bmi/bmi_noahowp.f90` (`get_value`/`set_value`) | `noahowp-bmi/src/lib.rs` | stub -- awaits the state types |
-| `bmi/bmi_noahowp.f90` (`update`) | `noahowp-bmi/src/lib.rs` | stub -- awaits the physics column |
-| `bmi/bmi_noahowp.f90` (`register_bmi`, C ABI) | `noahowp-bmi/src/c_abi.rs` | todo |
+| `bmi/bmi_noahowp.f90` (`get_value`/`set_value`) | `noahowp-bmi/src/lib.rs` | done |
+| `bmi/bmi_noahowp.f90` (`update`, `update_until`) | `noahowp-bmi/src/lib.rs` | done |
+| `bmi/bmi_noahowp.f90` (`register_bmi`, C ABI) | `noahowp-bmi/src/c_abi.rs` | done -- plain C `bmi.h`, no `iso_c_bmi` middleware |
 | `bmi/bmi.f90` | -- | n/a (abstract type; Rust uses a trait) |
 
 ### Out of scope
@@ -227,11 +221,13 @@ someone tidies it up.
 
 6. **`set_value`/`get_value` are not unit-symmetric.** `QSEVA` reads out as `qseva * 1000.0`
    and writes in as `src * 0.001`. Reproduce the factors *and* the operation order.
-   (outstanding -- lands with `get_value`/`set_value`)
+   (`noahowp-bmi/src/lib.rs`)
 
 7. **Secondary parameter derivation is duplicated inline** in `set_value`, not shared with
-   `ParametersType::paramRead`. Upstream can update one copy and not the other.
-   (outstanding -- lands with `parameters.rs`)
+   `ParametersType::paramRead`: `DKSAT` and `REFKDT` recompute `kdt`, `SMCMAX` recomputes
+   `frzx`, and nothing else recomputes anything. Upstream can update one copy and not the
+   other, so each copy is ported where upstream has it. (`parameters.rs`,
+   `noahowp-bmi/src/lib.rs`)
 
 8. **`NROOT_TABLE` is `real`; `parameters%NROOT` is `integer`.** The assignment truncates
    toward zero, which `as i32` reproduces. (`parameters.rs`)
@@ -289,7 +285,7 @@ someone tidies it up.
 20. **`x ** 0.5` is not a square root.** LLVM rewrites `x.powf(0.5)` into `sqrt` at `-O`, and
    gfortran's `powf` disagrees with `sqrt` on 0.04% of inputs -- so that rewrite makes release
    and debug builds differ. `powf` passes its exponent through `black_box` to keep the call a
-   call. This was the only genuine no-go the spike ever turned up, and it was found by probing
+   call. This was the only genuine no-go the probe ever turned up, and it was found by probing
    the exponents the physics actually uses rather than a representative sample.
    (`fortran/intrinsics.rs`)
 
